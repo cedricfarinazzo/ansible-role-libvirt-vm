@@ -120,7 +120,7 @@ The defaults are the OVMF files of Debian 13 and Ubuntu (package `ovmf`). For Se
 
 ### Removal
 
-`state: absent` (on the VM, or `libvirt_vm_defaults: {state: absent}` for all) removes `<name>.xml`. Remove the Pacemaker resource first: VirtualDomain cannot start a VM without its file.
+`state: absent` (on the VM, or `libvirt_vm_defaults: {state: absent}` for all) removes `<name>.xml`. Remove the Pacemaker resource first: VirtualDomain cannot start a VM without its file. A VM dropped from `libvirt_vm_vms` keeps its file: set it `absent` for one run before dropping it.
 
 ## 🎯 Usage Examples
 
