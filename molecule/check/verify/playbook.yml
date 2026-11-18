@@ -1,0 +1,27 @@
+---
+# Nothing written, nothing installed by the check run.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Read the directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: molecule_stat
+      loop:
+        - /etc/libvirt_vm
+        - /var/lib/libvirt_vm
+
+    - name: No directory created
+      ansible.builtin.assert:
+        that: molecule_stat.results | map(attribute='stat.exists') | list == [false, false]
+
+    - name: Read the package state
+      ansible.builtin.command: dpkg-query -W -f=${Status} libvirt-clients
+      register: molecule_pkg
+      changed_when: false
+      failed_when: false
+
+    - name: Libvirt-clients not installed
+      ansible.builtin.assert:
+        that: molecule_pkg.stdout is not search('install ok installed')

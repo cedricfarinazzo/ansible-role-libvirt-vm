@@ -1,0 +1,23 @@
+---
+# Check mode on a fresh host: it reports the changes and makes none.
+- name: Check mode on a fresh host
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Remove libvirt-clients, so the run would install it
+      ansible.builtin.apt:
+        name: libvirt-clients
+        state: absent
+
+    - name: Run in check mode
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: check mode on a fresh host
+        molecule_args:
+          - --check
+        molecule_expect: ok
+
+    - name: Changes reported
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=[1-9]')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"

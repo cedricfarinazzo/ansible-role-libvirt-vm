@@ -1,0 +1,51 @@
+---
+# Renders only: never virsh define, start or autostart. Pacemaker's VirtualDomain runs each file (config=).
+- name: Validation tools are installed
+  ansible.builtin.package:
+    name: "{{ libvirt_vm_packages }}"
+    state: present
+  when:
+    - libvirt_vm_validate
+    - libvirt_vm_packages | length > 0
+
+- name: The XML directory exists, root only
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_xml_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# libvirt copies the OVMF template here at the first start; never under /var/lib/libvirt (undefine deletes it)
+- name: The NVRAM directory exists
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_nvram_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+  when: __libvirt_vm_efi | length > 0
+
+- name: Domain XML files are rendered
+  ansible.builtin.template:
+    src: domain.xml.j2
+    dest: "{{ libvirt_vm_xml_dir }}/{{ __libvirt_vm_item.name }}.xml"
+    owner: root
+    group: root
+    mode: "0600"
+    validate: "{{ 'virt-xml-validate %s domain' if libvirt_vm_validate else omit }}"
+  loop: "{{ libvirt_vm_vms | selectattr('name', 'in', __libvirt_vm_present) | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  vars:
+    __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
+
+# The NVRAM file is the VM's EFI state: left in place, removed by hand when the VM is gone for good
+- name: Domain XML files of absent VMs are removed
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_xml_dir }}/{{ __libvirt_vm_item }}.xml"
+    state: absent
+  loop: "{{ libvirt_vm_vms | map(attribute='name') | difference(__libvirt_vm_present) }}"
+  loop_control:
+    loop_var: __libvirt_vm_item

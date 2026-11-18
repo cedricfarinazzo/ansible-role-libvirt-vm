@@ -1,0 +1,93 @@
+---
+# VirtualDomain starts the rendered file as a transient domain (config=), its VNC on 127.0.0.1 only, the guest
+# agent channel present; the role itself had defined nothing before Pacemaker ran it.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: List every domain libvirt knows, before Pacemaker
+      ansible.builtin.command: virsh -c qemu:///system list --all --name
+      register: molecule_domains
+      changed_when: false
+
+    - name: The role defined no domain
+      ansible.builtin.assert:
+        that: molecule_domains.stdout | trim == ''
+        fail_msg: "{{ molecule_domains.stdout_lines }}"
+
+    - name: A VirtualDomain resource runs the rendered file
+      ansible.builtin.command:
+        argv:
+          - cibadmin
+          - -C
+          - -o
+          - resources
+          - -X
+          - >-
+            <primitive id="vd-test" class="ocf" provider="heartbeat" type="VirtualDomain">
+            <instance_attributes id="vd-test-ia">
+            <nvpair id="vd-test-config" name="config" value="/etc/libvirt_vm/vd-test.xml"/>
+            <nvpair id="vd-test-hypervisor" name="hypervisor" value="qemu:///system"/>
+            </instance_attributes></primitive>
+      changed_when: true
+
+    - name: Crm_mon shows it Started
+      ansible.builtin.command: crm_mon -1
+      register: molecule_mon
+      changed_when: false
+      until: molecule_mon.stdout is search('vd-test\s+\(ocf:heartbeat:VirtualDomain\):\s+Started vmhost')
+      retries: 30
+      delay: 2
+
+    - name: Read the listening TCP sockets of qemu
+      ansible.builtin.shell: set -o pipefail; ss -ltnpH | grep qemu
+      args:
+        executable: /bin/bash
+      register: molecule_ss
+      changed_when: false
+
+    - name: VNC listens on 127.0.0.1 only
+      ansible.builtin.assert:
+        that:
+          - molecule_ss.stdout_lines | length == 1
+          - molecule_ss.stdout is search('127\.0\.0\.1:59[0-9][0-9] ')
+        fail_msg: "{{ molecule_ss.stdout_lines }}"
+
+    - name: Read the running domain's XML
+      ansible.builtin.command: virsh -c qemu:///system dumpxml vd-test
+      register: molecule_live
+      changed_when: false
+
+    - name: The running domain has the guest agent channel
+      ansible.builtin.assert:
+        that: molecule_live.stdout is search("name='org.qemu.guest_agent.0'")
+
+    - name: Read the domain's persistence
+      ansible.builtin.command: virsh -c qemu:///system dominfo vd-test
+      register: molecule_info
+      changed_when: false
+
+    - name: Transient, as VirtualDomain creates it from the file
+      ansible.builtin.assert:
+        that: molecule_info.stdout is search('Persistent:\s+no')
+
+    - name: Stop the resource
+      ansible.builtin.command: crm_resource -r vd-test --set-parameter target-role --meta --parameter-value Stopped
+      changed_when: true
+
+    - name: Crm_mon shows it Stopped
+      ansible.builtin.command: crm_mon -1 -r
+      register: molecule_mon
+      changed_when: false
+      until: molecule_mon.stdout is search('vd-test\s+\(ocf:heartbeat:VirtualDomain\):\s+Stopped')
+      retries: 30
+      delay: 2
+
+    - name: The rendered file is still there after the stop
+      ansible.builtin.stat:
+        path: /etc/libvirt_vm/vd-test.xml
+      register: molecule_file
+
+    - name: VirtualDomain's undefine left the file alone
+      ansible.builtin.assert:
+        that: molecule_file.stat.exists

@@ -1,0 +1,24 @@
+---
+# No XML file left; the directories and an EFI VM's NVRAM directory stay (the NVRAM is the VM's state).
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Find the XML files
+      ansible.builtin.find:
+        paths: /etc/libvirt_vm
+      register: molecule_files
+
+    - name: No XML file left
+      ansible.builtin.assert:
+        that: molecule_files.matched == 0
+        fail_msg: "{{ molecule_files.files | map(attribute='path') | list }}"
+
+    - name: Read the NVRAM directory
+      ansible.builtin.stat:
+        path: /var/lib/libvirt_vm/nvram
+      register: molecule_nvram
+
+    - name: The NVRAM directory is kept
+      ansible.builtin.assert:
+        that: molecule_nvram.stat.isdir

@@ -1,0 +1,60 @@
+---
+# The EFI VM names Debian's OVMF loader and NVRAM template, both present, its NVRAM outside libvirt's directories;
+# the BIOS VM has no loader.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - efi-vm
+        - bios-vm
+
+    - name: Read the files
+      ansible.builtin.slurp:
+        path: /etc/libvirt_vm/{{ item }}.xml
+      register: molecule_xml
+      loop:
+        - efi-vm
+        - bios-vm
+
+    - name: The EFI VM names the loader and the NVRAM template
+      ansible.builtin.assert:
+        that:
+          - "\"<loader readonly='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.fd</loader>\" in molecule_efi"
+          - "\"<nvram template='/usr/share/OVMF/OVMF_VARS_4M.fd'>/var/lib/libvirt_vm/nvram/efi-vm_VARS.fd</nvram>\" in molecule_efi"
+          - "'<loader' not in molecule_bios"
+          - "'<nvram' not in molecule_bios"
+        fail_msg: "{{ molecule_efi }}"
+      vars:
+        molecule_efi: "{{ molecule_xml.results[0].content | b64decode }}"
+        molecule_bios: "{{ molecule_xml.results[1].content | b64decode }}"
+
+    - name: Read the firmware files and the NVRAM directory
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: molecule_stat
+      loop:
+        - /usr/share/OVMF/OVMF_CODE_4M.fd
+        - /usr/share/OVMF/OVMF_VARS_4M.fd
+        - /var/lib/libvirt_vm/nvram
+
+    - name: The firmware files exist, the NVRAM directory is root 0711
+      ansible.builtin.assert:
+        that:
+          - molecule_stat.results[0].stat.exists
+          - molecule_stat.results[1].stat.exists
+          - molecule_stat.results[2].stat.isdir
+          - molecule_stat.results[2].stat.mode == '0711'
+
+    - name: List every domain libvirt knows
+      ansible.builtin.command: virsh -c qemu:///system list --all --name
+      register: molecule_domains
+      changed_when: false
+
+    - name: No domain is defined
+      ansible.builtin.assert:
+        that: molecule_domains.stdout | trim == ''
+        fail_msg: "{{ molecule_domains.stdout_lines }}"

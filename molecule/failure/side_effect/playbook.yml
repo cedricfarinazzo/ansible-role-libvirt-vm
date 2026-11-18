@@ -1,0 +1,92 @@
+---
+# Each bad run fails in validation with a message naming the input, and writes nothing: the files stay as converge
+# left them and no file of the bad VM appears.
+- name: Before the failure cases
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Read the XML directory
+      ansible.builtin.shell: set -o pipefail; ls -la --time-style=full-iso /etc/libvirt_vm; sha256sum /etc/libvirt_vm/*
+      args:
+        executable: /bin/bash
+      register: molecule_before
+      changed_when: false
+
+- name: Failure cases
+  hosts: vmhosts
+  gather_facts: false
+  vars:
+    molecule_cases:
+      - label: a bad MAC
+        vms: [{name: bad, interfaces: [{bridge: br0, mac: "02:00:00:00:00"}]}]
+        message: 'libvirt_vm_vms bad interfaces\[0\]: .*02:00:00:00:00'
+      - label: a multicast MAC
+        vms: [{name: bad, interfaces: [{bridge: br0, mac: "01:00:5e:00:00:01"}]}]
+        message: 'libvirt_vm_vms bad interfaces\[0\]: .*unicast mac'
+      - label: a MAC with a trailing newline
+        vms: [{name: bad, interfaces: [{bridge: br0, mac: "02:00:00:00:00:09\n"}]}]
+        message: 'libvirt_vm_vms bad interfaces\[0\]'
+      - label: a MAC used twice
+        vms: [{name: good, interfaces: [{bridge: br0, mac: "02:00:00:00:02:01"}]}, {name: bad, interfaces: [{bridge: br0, mac: "02:00:00:00:02:01"}]}]
+        message: a MAC address is used twice
+      - label: a name with a space
+        vms: [{name: "bad vm"}]
+        message: 'libvirt_vm_vms\[0\]: name .bad vm.'
+      - label: a name with a trailing newline
+        vms: [{name: "bad\n"}]
+        message: 'libvirt_vm_vms\[0\]: name .bad\\n.'
+      - label: a name with an embedded newline
+        vms: [{name: "bad\n<name>x"}]
+        message: 'libvirt_vm_vms\[0\]: name'
+      - label: a duplicate name
+        vms: [{name: good}, {name: good}]
+        message: a name is used twice
+      - label: a file disk under a .. path
+        vms: [{name: bad, disks: [{file: /srv/../etc/shadow, target: vda}]}]
+        message: 'libvirt_vm_vms bad disks\[0\]'
+      - label: a VNC listen with an embedded newline
+        vms: [{name: bad, vnc_listen: "127.0.0.1\n0.0.0.0"}]
+        message: 'libvirt_vm_vms bad: .*vnc_listen'
+      - label: an unknown key
+        vms: [{name: bad, autostart: true}]
+        message: 'libvirt_vm_vms\[0\]: .*known keys'
+  tasks:
+    - name: Run each bad input
+      ansible.builtin.command:
+        argv: "{{ [playbook_dir ~ '/../../shared/run.sh', '-e', {'libvirt_vm_vms': item.vms} | to_json] }}"
+      register: molecule_bad
+      changed_when: false
+      failed_when: >-
+        molecule_bad.rc == 0 or molecule_bad.stdout is not search(item.message)
+        or molecule_bad.stdout is search('changed=[1-9]')
+      delegate_to: localhost
+      run_once: true
+      loop: "{{ molecule_cases }}"
+      loop_control:
+        label: "{{ item.label }}"
+
+    - name: The XML directory moved to a libvirt directory
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: xml dir under /var/lib/libvirt
+        molecule_args:
+          - -e
+          - libvirt_vm_xml_dir=/var/lib/libvirt/vms
+        molecule_expect: fail
+
+    - name: Refused, naming the input
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('libvirt_vm_xml_dir. "/var/lib/libvirt/vms"')
+        fail_msg: "{{ molecule_run.stdout_lines[-12:] }}"
+
+    - name: Read the XML directory again
+      ansible.builtin.shell: set -o pipefail; ls -la --time-style=full-iso /etc/libvirt_vm; sha256sum /etc/libvirt_vm/*
+      args:
+        executable: /bin/bash
+      register: molecule_after
+      changed_when: false
+
+    - name: Nothing changed by the refused runs
+      ansible.builtin.assert:
+        that: molecule_after.stdout == molecule_before.stdout
+        fail_msg: "{{ molecule_after.stdout_lines }}"

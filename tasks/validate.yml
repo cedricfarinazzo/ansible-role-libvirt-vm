@@ -1,0 +1,166 @@
+---
+# Every input is asserted before any task writes: a bad value fails here, naming the input.
+- name: Role settings are valid
+  ansible.builtin.assert:
+    that:
+      - libvirt_vm_vms is sequence and libvirt_vm_vms is not string and libvirt_vm_vms is not mapping
+      - libvirt_vm_defaults is mapping
+      - libvirt_vm_defaults.keys() | difference(__libvirt_vm_vm_keys) | length == 0
+      - "'name' not in libvirt_vm_defaults"
+      - libvirt_vm_validate is boolean
+      - libvirt_vm_packages is sequence and libvirt_vm_packages is not string and libvirt_vm_packages is not mapping
+    fail_msg: >-
+      libvirt_vm_vms must be a list, libvirt_vm_defaults a mapping of VM keys without name,
+      libvirt_vm_validate a boolean, libvirt_vm_packages a list
+    quiet: true
+
+- name: Directories and firmware paths are valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_item.value is string
+      - __libvirt_vm_item.value is match(__libvirt_vm_path_re)
+      - __libvirt_vm_item.value is not search(__libvirt_vm_dotseg_re)
+      - __libvirt_vm_item.key not in ['libvirt_vm_xml_dir', 'libvirt_vm_nvram_dir'] or __libvirt_vm_item.value is not match(__libvirt_vm_forbidden_re)
+    fail_msg: >-
+      {{ __libvirt_vm_item.key }}: {{ __libvirt_vm_item.value | string | to_json }} must be an absolute path of
+      [A-Za-z0-9_.:+/-] with no . or .. segment; the XML and NVRAM directories never under /etc/libvirt or /var/lib/libvirt
+    quiet: true
+  loop: >-
+    {{ {'libvirt_vm_xml_dir': libvirt_vm_xml_dir, 'libvirt_vm_nvram_dir': libvirt_vm_nvram_dir,
+        'libvirt_vm_ovmf_code': libvirt_vm_ovmf_code, 'libvirt_vm_ovmf_vars': libvirt_vm_ovmf_vars} | dict2items }}
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.key }}"
+
+- name: Each VM is a mapping with known keys and a valid name
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_item is mapping
+      - __libvirt_vm_item.keys() | difference(__libvirt_vm_vm_keys) | length == 0
+      - __libvirt_vm_item.name is defined and __libvirt_vm_item.name is string
+      - __libvirt_vm_item.name is match(__libvirt_vm_name_re)
+    fail_msg: >-
+      libvirt_vm_vms[{{ __libvirt_vm_idx }}]: name
+      {{ (__libvirt_vm_item.name | default('') if __libvirt_vm_item is mapping else __libvirt_vm_item) | string | to_json }}
+      must match {{ __libvirt_vm_name_re }}; known keys: {{ __libvirt_vm_vm_keys | join(', ') }}
+    quiet: true
+  loop: "{{ libvirt_vm_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    index_var: __libvirt_vm_idx
+    label: "{{ __libvirt_vm_idx }}"
+
+- name: VM names are unique
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_names | length == __libvirt_vm_names | unique | length
+    fail_msg: "libvirt_vm_vms: a name is used twice in {{ __libvirt_vm_names | to_json }}"
+    quiet: true
+  vars:
+    __libvirt_vm_names: "{{ libvirt_vm_vms | map(attribute='name') | list }}"
+
+- name: Each VM's settings are valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_vm.state in __libvirt_vm_states
+      - __libvirt_vm_vm.memory_mib is integer and __libvirt_vm_vm.memory_mib is not boolean and __libvirt_vm_vm.memory_mib >= 16
+      - __libvirt_vm_vm.vcpus is integer and __libvirt_vm_vm.vcpus is not boolean and __libvirt_vm_vm.vcpus >= 1 and __libvirt_vm_vm.vcpus <= 512
+      - __libvirt_vm_vm.type in __libvirt_vm_types
+      - __libvirt_vm_vm.machine is string and __libvirt_vm_vm.machine is match(__libvirt_vm_machine_re)
+      - __libvirt_vm_vm.cpu_mode in __libvirt_vm_cpu_modes
+      - __libvirt_vm_vm.firmware in __libvirt_vm_firmwares
+      - __libvirt_vm_vm.disks is sequence and __libvirt_vm_vm.disks is not string and __libvirt_vm_vm.disks is not mapping
+      - __libvirt_vm_vm.interfaces is sequence and __libvirt_vm_vm.interfaces is not string and __libvirt_vm_vm.interfaces is not mapping
+      - __libvirt_vm_vm.vnc is boolean
+      - __libvirt_vm_vm.vnc_listen is string and __libvirt_vm_vm.vnc_listen is match(__libvirt_vm_listen_re)
+      - __libvirt_vm_vm.serial is boolean
+      - __libvirt_vm_vm.guest_agent is boolean
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_vm.name }}: state present|absent, memory_mib an integer >= 16, vcpus 1-512,
+      type {{ __libvirt_vm_types | join('|') }}, machine {{ __libvirt_vm_machine_re }}, cpu_mode {{ __libvirt_vm_cpu_modes | join('|') }},
+      firmware bios|efi, disks and interfaces lists, vnc/serial/guest_agent booleans, vnc_listen an IP address
+    quiet: true
+  loop: "{{ libvirt_vm_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  vars:
+    __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
+
+- name: Each disk is valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_item.disk is mapping
+      - __libvirt_vm_item.disk.keys() | difference(__libvirt_vm_disk_keys) | length == 0
+      - (__libvirt_vm_item.disk.dev is defined) != (__libvirt_vm_item.disk.file is defined)
+      - __libvirt_vm_item.disk.dev is not defined or (__libvirt_vm_item.disk.dev is string and __libvirt_vm_item.disk.dev is match(__libvirt_vm_dev_re)
+        and __libvirt_vm_item.disk.dev is not search(__libvirt_vm_dotseg_re))
+      - __libvirt_vm_item.disk.file is not defined or (__libvirt_vm_item.disk.file is string and __libvirt_vm_item.disk.file is match(__libvirt_vm_path_re)
+        and __libvirt_vm_item.disk.file is not search(__libvirt_vm_dotseg_re))
+      - __libvirt_vm_item.disk.target is defined and __libvirt_vm_item.disk.target is string and __libvirt_vm_item.disk.target is match(__libvirt_vm_target_re)
+      - __libvirt_vm_disk.format in __libvirt_vm_formats
+      - __libvirt_vm_disk.bus in __libvirt_vm_buses
+      - __libvirt_vm_disk.cache in __libvirt_vm_caches
+      - __libvirt_vm_disk.discard in __libvirt_vm_discards
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_item.vm }} disks[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.disk | to_json }} needs exactly
+      one of dev (/dev/...) or file (absolute path), a target ({{ __libvirt_vm_target_re }}), format {{ __libvirt_vm_formats | join('|') }},
+      bus {{ __libvirt_vm_buses | join('|') }}, cache {{ __libvirt_vm_caches | join('|') }}, discard {{ __libvirt_vm_discards | join('|') }};
+      known keys: {{ __libvirt_vm_disk_keys | join(', ') }}
+    quiet: true
+  loop: "{{ __libvirt_vm_disk_list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.vm }} disks[{{ __libvirt_vm_item.index }}]"
+  vars:
+    __libvirt_vm_disk_list: >-
+      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for d in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).disks %}{%
+      set _ = out.append({'vm': vm.name, 'index': loop.index0, 'disk': d}) %}{% endfor %}{% endfor %}{{ out }}
+    __libvirt_vm_disk: "{{ __libvirt_vm_disk_defaults | combine(__libvirt_vm_item.disk if __libvirt_vm_item.disk is mapping else {}) }}"
+
+- name: Disk targets are unique within each VM
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_targets | length == __libvirt_vm_targets | unique | length
+    fail_msg: "libvirt_vm_vms {{ __libvirt_vm_item.name }}: a disk target is used twice in {{ __libvirt_vm_targets | to_json }}"
+    quiet: true
+  loop: "{{ libvirt_vm_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  vars:
+    __libvirt_vm_targets: "{{ (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item)).disks | map(attribute='target') | list }}"
+
+- name: Each interface is valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_item.nic is mapping
+      - __libvirt_vm_item.nic.keys() | difference(__libvirt_vm_interface_keys) | length == 0
+      - __libvirt_vm_item.nic.bridge is defined and __libvirt_vm_item.nic.bridge is string and __libvirt_vm_item.nic.bridge is match(__libvirt_vm_bridge_re)
+      - __libvirt_vm_item.nic.mac is defined and __libvirt_vm_item.nic.mac is string and __libvirt_vm_item.nic.mac is match(__libvirt_vm_mac_re)
+      - __libvirt_vm_nic.model in __libvirt_vm_nic_models
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_item.vm }} interfaces[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.nic | to_json }} needs a bridge
+      ({{ __libvirt_vm_bridge_re }}), a unicast mac (aa:bb:cc:dd:ee:ff), model {{ __libvirt_vm_nic_models | join('|') }};
+      known keys: {{ __libvirt_vm_interface_keys | join(', ') }}
+    quiet: true
+  loop: "{{ __libvirt_vm_nic_list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.vm }} interfaces[{{ __libvirt_vm_item.index }}]"
+  vars:
+    __libvirt_vm_nic_list: >-
+      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for n in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).interfaces %}{%
+      set _ = out.append({'vm': vm.name, 'index': loop.index0, 'nic': n}) %}{% endfor %}{% endfor %}{{ out }}
+    __libvirt_vm_nic: "{{ __libvirt_vm_interface_defaults | combine(__libvirt_vm_item.nic if __libvirt_vm_item.nic is mapping else {}) }}"
+
+- name: MAC addresses are unique across VMs
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_macs | length == __libvirt_vm_macs | unique | length
+    fail_msg: "libvirt_vm_vms: a MAC address is used twice in {{ __libvirt_vm_macs | to_json }}"
+    quiet: true
+  vars:
+    __libvirt_vm_macs: >-
+      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for n in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).interfaces %}{%
+      set _ = out.append(n.mac | lower) %}{% endfor %}{% endfor %}{{ out }}

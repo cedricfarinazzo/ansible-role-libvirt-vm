@@ -1,0 +1,60 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# One host, single-node Pacemaker: ocf:heartbeat:VirtualDomain starts the rendered file under TCG
+platforms:
+  - name: libvirt-vm-virtualdomain-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    # libqb IPC of corosync and pacemaker lives in /dev/shm: Docker's 64 MB fills up
+    shm_size: 512m
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare/playbook.yml
+    converge: ../shared/converge.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        molecule_packages:
+          - qemu-system-x86
+          - qemu-utils
+          - pacemaker
+          - corosync
+          - resource-agents
+        libvirt_vm_vms:
+          # No /dev/kvm in a container: software emulation
+          - name: vd-test
+            type: qemu
+            cpu_mode: maximum
+            memory_mib: 128
+            disks:
+              - file: /srv/vd-test.qcow2
+                format: qcow2
+                target: vda
+verifier:
+  name: ansible
+scenario:
+  name: virtualdomain
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - converge
+    - verify
+    - destroy

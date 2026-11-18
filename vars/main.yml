@@ -1,0 +1,116 @@
+---
+# The per-VM values when neither the VM nor libvirt_vm_defaults sets them
+__libvirt_vm_base:
+  state: present
+  memory_mib: 1024
+  vcpus: 1
+  # kvm on a host with /dev/kvm; qemu = software emulation (TCG)
+  type: kvm
+  machine: q35
+  # host-passthrough | host-model | maximum (TCG) | none (no <cpu> element)
+  cpu_mode: host-passthrough
+  # bios | efi
+  firmware: bios
+  # Each {dev | file, format (raw), target, bus (virtio), cache (none), discard (unmap)}
+  disks: []
+  # Each {bridge, mac, model (virtio)}
+  interfaces: []
+  vnc: true
+  vnc_listen: 127.0.0.1
+  # A pty serial console (virsh console)
+  serial: true
+  # The org.qemu.guest_agent.0 virtio-serial channel (virsh domifaddr --source agent)
+  guest_agent: true
+
+# Allowed keys per object: anything else fails validation, a typo never renders silently
+__libvirt_vm_vm_keys:
+  - name
+  - state
+  - memory_mib
+  - vcpus
+  - type
+  - machine
+  - cpu_mode
+  - firmware
+  - disks
+  - interfaces
+  - vnc
+  - vnc_listen
+  - serial
+  - guest_agent
+__libvirt_vm_disk_keys:
+  - dev
+  - file
+  - format
+  - target
+  - bus
+  - cache
+  - discard
+__libvirt_vm_disk_defaults:
+  format: raw
+  bus: virtio
+  cache: none
+  discard: unmap
+__libvirt_vm_interface_keys:
+  - bridge
+  - mac
+  - model
+__libvirt_vm_interface_defaults:
+  model: virtio
+
+# Anchored with \Z: $ would accept a trailing newline. Kept here, not in Jinja literals, which unescape \.
+__libvirt_vm_name_re: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}\Z'
+__libvirt_vm_machine_re: '^[a-z0-9][a-z0-9_.-]{0,63}\Z'
+# Unicast (even first octet), lower or upper case
+__libvirt_vm_mac_re: '^[0-9A-Fa-f][02468ACEace](:[0-9A-Fa-f]{2}){5}\Z'
+__libvirt_vm_bridge_re: '^[A-Za-z0-9_.-]{1,15}\Z'
+__libvirt_vm_target_re: '^(vd|sd|hd)[a-z]{1,2}\Z'
+__libvirt_vm_dev_re: '^/dev/[A-Za-z0-9_.:+/-]+\Z'
+__libvirt_vm_path_re: '^/[A-Za-z0-9_.:+/-]+\Z'
+__libvirt_vm_listen_re: '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|[0-9A-Fa-f:]*:[0-9A-Fa-f:.]*)\Z'
+
+__libvirt_vm_types:
+  - kvm
+  - qemu
+__libvirt_vm_cpu_modes:
+  - host-passthrough
+  - host-model
+  - maximum
+  - none
+__libvirt_vm_firmwares:
+  - bios
+  - efi
+__libvirt_vm_states:
+  - present
+  - absent
+__libvirt_vm_formats:
+  - raw
+  - qcow2
+__libvirt_vm_buses:
+  - virtio
+  - sata
+  - scsi
+__libvirt_vm_caches:
+  - none
+  - default
+  - writeback
+  - writethrough
+  - directsync
+  - unsafe
+__libvirt_vm_discards:
+  - unmap
+  - ignore
+__libvirt_vm_nic_models:
+  - virtio
+  - e1000e
+  - rtl8139
+# libvirt's own directories (an undefine deletes files there) and . or .. path segments
+__libvirt_vm_forbidden_re: '^/+(etc|var/+lib)/+libvirt(/|\Z)'
+__libvirt_vm_dotseg_re: '(^|/)\.{1,2}(/|\Z)'
+# Names of the VMs with state present (each VM merged with libvirt_vm_defaults)
+__libvirt_vm_present: >-
+  {% set out = [] %}{% for vm in libvirt_vm_vms %}{% if (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).state == 'present' %}{%
+  set _ = out.append(vm.name) %}{% endif %}{% endfor %}{{ out }}
+__libvirt_vm_efi: >-
+  {% set out = [] %}{% for vm in libvirt_vm_vms %}{% if (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).firmware == 'efi' %}{%
+  set _ = out.append(vm.name) %}{% endif %}{% endfor %}{{ out }}

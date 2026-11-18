@@ -1,0 +1,55 @@
+---
+# Rendered without libvirt-clients (no validation, no package), in other directories, with the shared defaults and
+# the other OVMF files; a VM's own key wins over the defaults.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Read the package state
+      ansible.builtin.command: dpkg-query -W -f=${Status} libvirt-clients
+      register: molecule_pkg
+      changed_when: false
+      failed_when: false
+
+    - name: No package installed
+      ansible.builtin.assert:
+        that: molecule_pkg.stdout is not search('install ok installed')
+
+    - name: Read the directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: molecule_stat
+      loop:
+        - /srv/vm-xml
+        - /srv/vm-nvram
+        - /etc/libvirt_vm
+
+    - name: The other directories, the default one unused
+      ansible.builtin.assert:
+        that:
+          - molecule_stat.results[0].stat.mode == '0700'
+          - molecule_stat.results[1].stat.mode == '0711'
+          - not molecule_stat.results[2].stat.exists
+
+    - name: Read the files
+      ansible.builtin.slurp:
+        path: /srv/vm-xml/{{ item }}.xml
+      register: molecule_xml
+      loop:
+        - a
+        - b
+
+    - name: A takes the defaults, b its own memory and firmware
+      ansible.builtin.assert:
+        that:
+          - "\"<memory unit='MiB'>512</memory>\" in molecule_a"
+          - "\"<loader readonly='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.ms.fd</loader>\" in molecule_a"
+          - "\"<nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd'>/srv/vm-nvram/a_VARS.fd</nvram>\" in molecule_a"
+          - "'<graphics' not in molecule_a"
+          - "\"<memory unit='MiB'>768</memory>\" in molecule_b"
+          - "'<loader' not in molecule_b"
+          - "'<graphics' not in molecule_b"
+        fail_msg: "{{ molecule_a }} {{ molecule_b }}"
+      vars:
+        molecule_a: "{{ molecule_xml.results[0].content | b64decode }}"
+        molecule_b: "{{ molecule_xml.results[1].content | b64decode }}"
