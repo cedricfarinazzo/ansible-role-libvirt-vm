@@ -1,5 +1,5 @@
 ---
-# Each seed ISO has volume id cidata and the given files; meta-data defaults to the VM name; the cdrom is read-only; vm3 has none.
+# Each seed ISO has volume id cidata and the given files; meta-data defaults to the VM name; the qemu user traverses the seed directory, lists nothing; the cdrom is read-only; vm3 has none.
 - name: Verify
   hosts: vmhosts
   gather_facts: false
@@ -86,6 +86,23 @@
         fail_msg: "{{ molecule_c }}"
       vars:
         molecule_c: "{{ molecule_seed.results | map(attribute='content') | map('b64decode') | list }}"
+
+    # libvirt chowns the ISO to the qemu user at start, never its directory: qemu must traverse it
+    - name: Read the seed directory modes and what the qemu user reaches
+      ansible.builtin.shell: >-
+        set -o pipefail; stat -c '%a %U:%G' /var/lib/libvirt_vm/cloud-init /var/lib/libvirt_vm/cloud-init/vm1;
+        runuser -u libvirt-qemu -- stat -c ok /var/lib/libvirt_vm/cloud-init/vm1-seed.iso 2>&1 || echo no-traverse;
+        runuser -u libvirt-qemu -- ls /var/lib/libvirt_vm/cloud-init >/dev/null 2>&1 && echo listed || echo no-list;
+        runuser -u libvirt-qemu -- ls /var/lib/libvirt_vm/cloud-init/vm1 >/dev/null 2>&1 && echo staging-listed || echo staging-closed
+      args:
+        executable: /bin/bash
+      register: molecule_dirs
+      changed_when: false
+
+    - name: Seed directory 0711, staging 0700, the qemu user reaches the ISO but lists nothing
+      ansible.builtin.assert:
+        that: "molecule_dirs.stdout_lines == ['711 root:root', '700 root:root', 'ok', 'no-list', 'staging-closed']"
+        fail_msg: "{{ molecule_dirs.stdout_lines }}"
 
     - name: Read vm3's seed
       ansible.builtin.stat:

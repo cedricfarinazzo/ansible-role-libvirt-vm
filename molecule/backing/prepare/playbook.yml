@@ -21,12 +21,15 @@
       args:
         creates: /srv/images/base.raw
 
-    - name: The same image served
+    - name: The same image served, as a backing file and as a copy
       ansible.builtin.copy:
         src: /srv/images/base.raw
-        dest: /srv/www/base.raw
+        dest: /srv/www/{{ item }}
         remote_src: true
         mode: "0644"
+      loop:
+        - base.raw
+        - copy.raw
 
     - name: The HTTP server runs
       ansible.builtin.shell: >-

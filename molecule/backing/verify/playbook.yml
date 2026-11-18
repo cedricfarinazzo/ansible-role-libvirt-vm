@@ -1,5 +1,5 @@
 ---
-# A local and a downloaded backing file under qcow2 overlays, a full copy grown to its size; one download in the cache.
+# A local and a downloaded backing file under qcow2 overlays, a full copy grown to its size; each URL downloaded once; the cache keeps the backing file only.
 - name: Verify
   hosts: vmhosts
   gather_facts: false
@@ -36,15 +36,15 @@
         molecule_copy: "{{ molecule_info.results[2].stdout | from_json }}"
         molecule_cached: /var/cache/libvirt_vm/30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58-base.raw
 
-    - name: Read the HTTP log
-      ansible.builtin.command: grep -c 'GET /base.raw' /var/log/molecule-http.log
+    - name: Read the HTTP log and the cache
+      ansible.builtin.shell: grep -c 'GET /base.raw' /var/log/molecule-http.log; grep -c 'GET /copy.raw' /var/log/molecule-http.log; ls /var/cache/libvirt_vm
       register: molecule_gets
       changed_when: false
 
-    - name: The URL used by two disks was downloaded once
+    - name: Each URL downloaded once, the copied image removed, the backing file kept
       ansible.builtin.assert:
-        that: molecule_gets.stdout == '1'
-        fail_msg: "{{ molecule_gets.stdout }} downloads"
+        that: molecule_gets.stdout_lines == ['1', '1', '30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58-base.raw']
+        fail_msg: "{{ molecule_gets.stdout_lines }}"
 
     - name: The overlay is the VM's disk
       ansible.builtin.include_tasks: ../../shared/xpath.yml

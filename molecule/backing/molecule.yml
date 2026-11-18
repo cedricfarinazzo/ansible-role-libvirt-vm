@@ -56,7 +56,7 @@ provisioner:
               - file: /srv/vms/copy.raw
                 size: 8M
                 target: vda
-                image: http://127.0.0.1:8080/base.raw
+                image: http://127.0.0.1:8080/copy.raw
                 checksum: sha256:30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58
 verifier:
   name: ansible
