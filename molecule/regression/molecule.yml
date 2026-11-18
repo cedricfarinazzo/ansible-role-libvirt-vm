@@ -4,7 +4,7 @@ dependency:
   command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
 driver:
   name: docker
-# 1.0.0 inputs: the XML is byte for byte what 1.0.0 rendered (files/, from tag 1.0.0)
+# 1.0.0 and 1.1.0 inputs: the XML is byte for byte what that tag rendered (files/; g* from tag 1.1.0)
 platforms:
   - name: libvirt-vm-regression-${MOLECULE_DISTRO:-debian13}
     hostname: vmhost
@@ -67,6 +67,21 @@ provisioner:
           - name: uefi
             firmware: efi
             vcpus: 4
+          - name: gvnc
+            graphics:
+              type: vnc
+              listen: 192.0.2.20
+              port: 5905
+            video: vga
+          - name: gspice
+            graphics:
+              type: spice
+              listen: 127.0.0.1
+              password: regression-pw-1
+            video: qxl
+          - name: gnone
+            graphics:
+              type: none
 verifier:
   name: ansible
 scenario:

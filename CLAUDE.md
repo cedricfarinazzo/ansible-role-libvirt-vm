@@ -21,7 +21,7 @@ Public Ansible role `cedricfarinazzo.libvirt_vm` (Ansible Galaxy): one libvirt d
 - `molecule/check/` — check mode on a fresh host writes nothing.
 - `molecule/failure/` — each bad input refused with its name, nothing written.
 - `molecule/virtualdomain/` — single-node Pacemaker; VirtualDomain starts a rendered file under TCG.
-- `molecule/regression/` — 1.0.0 inputs against `files/`, the XML tag 1.0.0 rendered: byte for byte.
+- `molecule/regression/` — 1.0.0 and 1.1.0 inputs against `files/`, the XML their tag rendered: byte for byte.
 - `molecule/{disks,backing,cloudinit,nics,hostdevs,graphics,boot}/` — one option group each, values checked by XPath; `backing` serves its image over a local HTTP server.
 - `molecule/autostart/` — `libvirt_vm_pacemaker: false`: define, autostart, start, undefine.
 - `tests/validate.test.sh` — good and bad inputs against `tasks/validate.yml` on localhost.
@@ -39,7 +39,7 @@ Public Ansible role `cedricfarinazzo.libvirt_vm` (Ansible Galaxy): one libvirt d
 - **Variables:** every user-facing variable starts with `libvirt_vm_`, is defined in `defaults/main.yml`, asserted in `tasks/validate.yml` (with a case in `tests/validate.test.sh`) and documented in `README.md` in the same PR; a new VM key also goes in `__libvirt_vm_base` and `__libvirt_vm_vm_keys`. Internal values start with `__libvirt_vm_`.
 - **Every input checked before any change.** Every regex ends in `\Z`, never `$`, and lives in `vars/main.yml` (a Jinja literal unescapes `\`); bad cases feed trailing and embedded newlines.
 - **Never define, start or autostart a domain under Pacemaker:** `virsh` only in `define.yml`, imported when `libvirt_vm_pacemaker` is false; no `community.libvirt`. Every scenario but `autostart` lists `virsh list --all` and fails on any domain.
-- **1.0.0 inputs render the 1.0.0 XML:** a new key renders nothing at its default; the `regression` scenario compares bytes. Regenerate `files/` only for a breaking change.
+- **Older inputs render their XML:** a new key or form renders nothing new for 1.0.0 and 1.1.0 inputs; the `regression` scenario compares bytes. Regenerate `files/` only for a breaking change.
 - **Secrets never printed:** `-v` prints each loop item in full, so with a graphics password or `cloud_init` anywhere every task looping over VMs is `no_log: "{{ __libvirt_vm_secret }}"`; seed staging is always `no_log`. A new task looping over VMs takes the same line. The `cloudinit` and `graphics` side effects grep `-vvv --diff` output for the secret.
 - **An existing disk is data:** created only when missing (`creates:`), never resized or rewritten.
 - **No file under `/etc/libvirt` or `/var/lib/libvirt`:** an undefine deletes files there; `validate.yml` refuses those directories.

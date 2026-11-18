@@ -277,21 +277,17 @@
   vars:
     __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
 
-- name: Each VM's graphics are valid
+- name: Each VM's graphics are a mapping or a list of them
   ansible.builtin.assert:
     that:
-      - __libvirt_vm_g is mapping
-      - __libvirt_vm_g.keys() | difference(__libvirt_vm_graphics_keys) | length == 0
-      - __libvirt_vm_g.type | default('vnc') in __libvirt_vm_graphics_types
-      - __libvirt_vm_g.listen is not defined or (__libvirt_vm_g.listen is string and __libvirt_vm_g.listen is match(__libvirt_vm_listen_re))
-      - __libvirt_vm_g.port is not defined or (__libvirt_vm_g.port is integer and __libvirt_vm_g.port is not boolean
-        and (__libvirt_vm_g.port == -1 or (__libvirt_vm_g.port >= 5900 and __libvirt_vm_g.port <= 65535)))
-      - __libvirt_vm_g.password is not defined or (__libvirt_vm_g.password is string and __libvirt_vm_g.password is match(__libvirt_vm_password_re))
-    # The password never reaches the output
+      - __libvirt_vm_g is mapping or (__libvirt_vm_g is sequence and __libvirt_vm_g is not string and __libvirt_vm_g | length > 0
+        and __libvirt_vm_g | reject('mapping') | list | length == 0)
+      - __libvirt_vm_g is mapping or __libvirt_vm_types | unique | length == __libvirt_vm_types | length
+      - __libvirt_vm_g is mapping or 'none' not in __libvirt_vm_types or __libvirt_vm_g | length == 1
+      - __libvirt_vm_g is mapping or __libvirt_vm_ports | unique | length == __libvirt_vm_ports | length
     fail_msg: >-
-      libvirt_vm_vms {{ __libvirt_vm_item.name }} graphics: a mapping of {{ __libvirt_vm_graphics_keys | join(', ') }}; type
-      {{ __libvirt_vm_graphics_types | join('|') }}, listen an IP address, port -1 or 5900-65535, password 1-64 characters without
-      quote, angle bracket, ampersand, space or newline
+      libvirt_vm_vms {{ __libvirt_vm_item.name }} graphics: a mapping or a non-empty list of mappings; in a list each type once,
+      none only alone, each fixed port once
     quiet: true
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
@@ -302,6 +298,32 @@
   when: __libvirt_vm_g is not none
   vars:
     __libvirt_vm_g: "{{ (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item)).graphics }}"
+    __libvirt_vm_gl: "{{ __libvirt_vm_g | select('mapping') | list if __libvirt_vm_g is sequence and __libvirt_vm_g is not string else [] }}"
+    __libvirt_vm_types: "{{ __libvirt_vm_gl | map(attribute='type', default='vnc') | list }}"
+    __libvirt_vm_ports: "{{ __libvirt_vm_gl | map(attribute='port', default=-1) | reject('equalto', -1) | list }}"
+
+- name: Each graphics entry is valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_g.keys() | difference(__libvirt_vm_graphics_keys) | length == 0
+      - __libvirt_vm_g.type | default('vnc') in __libvirt_vm_graphics_types
+      - __libvirt_vm_g.listen is not defined or (__libvirt_vm_g.listen is string and __libvirt_vm_g.listen is match(__libvirt_vm_listen_re))
+      - __libvirt_vm_g.port is not defined or (__libvirt_vm_g.port is integer and __libvirt_vm_g.port is not boolean
+        and (__libvirt_vm_g.port == -1 or (__libvirt_vm_g.port >= 5900 and __libvirt_vm_g.port <= 65535)))
+      - __libvirt_vm_g.password is not defined or (__libvirt_vm_g.password is string and __libvirt_vm_g.password is match(__libvirt_vm_password_re))
+    # The password never reaches the output
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_item.name }} graphics: keys {{ __libvirt_vm_graphics_keys | join(', ') }}; type
+      {{ __libvirt_vm_graphics_types | join('|') }}, listen an IP address, port -1 or 5900-65535, password 1-64 characters without
+      quote, angle bracket, ampersand, space or newline
+    quiet: true
+  loop: "{{ __libvirt_vm_graphics_entries }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  no_log: "{{ __libvirt_vm_secret }}"
+  vars:
+    __libvirt_vm_g: "{{ __libvirt_vm_item.g }}"
 
 - name: Each hostdev is valid
   ansible.builtin.assert:

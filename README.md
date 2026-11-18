@@ -135,7 +135,7 @@ Every key below was added in 1.1.0; at its default it renders exactly what 1.0.0
     - hd
   bootmenu: false           # the firmware's boot menu
   bios_useserial: false     # SeaBIOS output on the serial console
-  graphics: null            # replaces vnc/vnc_listen when set, see Graphics
+  graphics: null            # a mapping or a list of them; replaces vnc/vnc_listen when set, see Graphics
   video: virtio             # vga | qxl | bochs | none (with graphics)
   rng: false                # a virtio-rng device fed by /dev/urandom
   console_log: null         # an absolute path: the serial console goes to this file instead of a pty
@@ -218,8 +218,8 @@ Every value is checked before any change; a bad one fails the run naming the inp
 | `interfaces` | `[]` | list of mappings, see below | The network interfaces. |
 | `vnc` | `true` | boolean | 1.0.0 key: `true` gives a VNC console on `vnc_listen`; `false` none. Ignored when `graphics` is set. |
 | `vnc_listen` | `127.0.0.1` | IPv4 or IPv6 address | 1.0.0 key: the address the VNC console listens on; see Graphics. Ignored when `graphics` is set. |
-| `graphics` | `null` | mapping, see below | The console. When set it replaces `vnc` and `vnc_listen`. |
-| `video` | `virtio` | `virtio`, `vga`, `qxl`, `bochs`, `none` | The video device, rendered only when graphics is not `none`. `virtio`: the default for Linux guests. `vga`: the most compatible, for guests without virtio-gpu drivers. `qxl`: the SPICE-optimised device. `bochs`: a simple framebuffer for UEFI guests. `none`: no video model. |
+| `graphics` | `null` | mapping, or a non-empty list of mappings, see below | The console. When set it replaces `vnc` and `vnc_listen`. A list gives one device per entry (VNC and SPICE at once): each type at most once, `none` only alone, each fixed port once; a SPICE entry in a list also adds the `com.redhat.spice.0` agent channel. |
+| `video` | `virtio` | `virtio`, `vga`, `qxl`, `bochs`, `none` | The video device, one per VM, rendered only when there is a graphics device. `virtio`: the default for Linux guests. `vga`: the most compatible, for guests without virtio-gpu drivers. `qxl`: the SPICE-optimised device. `bochs`: a simple framebuffer for UEFI guests. `none`: no video model. |
 | `serial` | `true` | boolean | A pty serial console, reached with `virsh console`. |
 | `console_log` | `null` | absolute path | The serial console is written to this file instead of a pty (its directory is created `0750`). |
 | `console_log_append` | `false` | boolean | `true`: keep the file across restarts and append. `false`: truncated at each start. |
@@ -280,7 +280,7 @@ The console is served by the QEMU process on the host, not inside the guest: `li
 
 | Key | Default | Allowed | What it does |
 |-----|---------|---------|--------------|
-| `type` | `vnc` (`none` when `vnc: false`) | `none`, `vnc`, `spice` | `none`: no graphics device and no video (headless, serial only). `vnc`: any VNC client. `spice`: SPICE client; better with `video: qxl`, clipboard and USB redirection. |
+| `type` | `vnc` (a mapping with `vnc: false`: `none`) | `none`, `vnc`, `spice` | `none`: no graphics device and no video (headless, serial only). `vnc`: any VNC client. `spice`: SPICE client; better with `video: qxl`, clipboard and USB redirection. |
 | `listen` | `vnc_listen` (`127.0.0.1`) | IPv4 or IPv6 address | The host address to bind. |
 | `port` | `-1` | `-1` or an integer 5900-65535 | `-1`: autoport from 5900. A fixed port must be free on the host and distinct per VM. |
 | `password` | none | 1-64 characters of `A-Za-z0-9` and ``!#$%()*+,./:;=?@^_{|}~-`` | The console password. Give it through a vaulted variable; it is written into the XML file (root `0600`) and never printed. |
@@ -341,7 +341,19 @@ graphics:
   password: "{{ vault_web_console_password }}"   # by variable; lands in the XML file (root 0600)
 ```
 
-When any VM (or `libvirt_vm_defaults`) has a graphics password or a `cloud_init` key, every task whose loop item holds a VM runs `no_log`, so `-v` and `--diff` print neither the secret nor the files. A validation failure then reads `censored`: find the bad input by running without the secrets, or with `no_log` off in a private run.
+Several consoles at once, each reached through an SSH tunnel to the host:
+
+```yaml
+graphics:
+  - type: vnc
+    listen: 127.0.0.1
+  - type: spice
+    listen: 127.0.0.1       # the list form adds the SPICE agent channel (clipboard, resolution)
+```
+
+The single mapping renders exactly what 1.1.0 rendered: no SPICE channel. Use a list of one entry to get it.
+
+When any VM (or `libvirt_vm_defaults`) has a graphics password (in a mapping or a list entry) or a `cloud_init` key, every task whose loop item holds a VM runs `no_log`, so `-v` and `--diff` print neither the secret nor the files. A validation failure then reads `censored`: find the bad input by running without the secrets, or with `no_log` off in a private run.
 
 ### Host devices
 
@@ -484,13 +496,13 @@ tests/validate.test.sh                   # the input checks
 | `absent` | One VM absent by its own state, then all through `libvirt_vm_defaults`; each rerun changes nothing; the NVRAM directory kept |
 | `check` | Check mode on a fresh host reports changes and writes nothing: no directory, no package |
 | `failure` | Define or autostart under Pacemaker, a bad, multicast or duplicate MAC, a name with a space, a trailing or embedded newline, a duplicate name, a `..` disk path, a newline in `vnc_listen`, an unknown key, the XML directory under `/var/lib/libvirt`: each fails with a message naming the input, nothing written |
-| `regression` | The 1.0.0 inputs (four VMs, BIOS and EFI) render files equal byte for byte to the ones tag 1.0.0 rendered (`files/`); idempotence |
+| `regression` | The 1.0.0 inputs (four VMs, BIOS and EFI) and the 1.1.0 graphics mappings (VNC on a fixed port, SPICE with a password, none) render files equal byte for byte to the ones their tag rendered (`files/`); idempotence |
 | `disks` | File, block and cdrom disks, read-only, cache, io and discard, four targets in list order (XPath); disks created by `qemu-img` at their format and size; an existing disk keeps its data and size on a rerun with another size |
 | `backing` | A local backing file and a backing URL (a local HTTP server) under qcow2 overlays, a full copy from a URL grown to its size; the URL used by two disks downloaded once; with the server stopped a rerun changes nothing (cache); a wrong checksum fails, no disk and no XML written |
 | `cloudinit` | Seed ISOs with volume id `cidata` and exactly the given files, meta-data defaulting to the name, ISO `0600`, a read-only sata cdrom in the XML, an ISO at a path of its own; `enabled: false`: no cdrom, no ISO; a changed user-data rebuilds that ISO only and its secret never appears at `-vvv --diff`; then a rerun changes nothing; set absent, the staged files and default ISO removed, an ISO at its own path kept |
 | `nics` | Bridge, network and direct interfaces in list order, MAC lower-cased, model, driver name and queues, alias, tap name, trustGuestRxFilters (XPath) |
 | `hostdevs` | PCI by host address with a guest address and alias, unmanaged PCI, USB by vendor and product: each attribute exact (XPath) |
-| `graphics` | `none` (no graphics, no video), VNC on an address, SPICE on a fixed port with a password from a variable, the 1.0.0 `vnc_listen` still honoured; a changed password rewrites the file and appears nowhere at `-vvv --diff` |
+| `graphics` | `none` (no graphics, no video), VNC on an address, SPICE on a fixed port with a password from a variable, the 1.0.0 `vnc_listen` still honoured; a list of VNC and SPICE renders both in order with one video and the SPICE channel, a list of one `none` nothing, a list entry without a type VNC; a changed password rewrites the files and appears nowhere at `-vvv --diff`, nor a password held only in a list |
 | `boot` | The boot list order kept in the XML (a template that reorders it fails the verify: mutation proven), boot menu, BIOS serial, fixed and deterministic UUIDs, clock, emulator, rng, console log file and its `0750` directory |
 | `autostart` | `libvirt_vm_pacemaker: false`: a VM defined, autostarted and running under TCG, one defined with autostart off, one only rendered; autostart turned off on a rerun; all absent: stopped and undefined |
 | `virtualdomain` | A single-node Pacemaker in the container: no domain before Pacemaker; `ocf:heartbeat:VirtualDomain` with the rendered `config` starts the VM under TCG (`crm_mon -1`: Started), transient, VNC on `127.0.0.1` only, the guest agent channel in the running domain; after a stop the file is still there |

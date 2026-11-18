@@ -131,13 +131,26 @@
       <target type='virtio' name='org.qemu.guest_agent.0'/>
     </channel>
 {% endif %}
-{# graphics, when set, replaces vnc and vnc_listen #}
-{% set gr = {'type': 'vnc' if __libvirt_vm_vm.vnc else 'none', 'listen': __libvirt_vm_vm.vnc_listen, 'port': -1}
-   | combine(__libvirt_vm_vm.graphics if __libvirt_vm_vm.graphics is mapping else {}) %}
-{% if gr.type != 'none' %}
+{# graphics, when set, replaces vnc and vnc_listen; a list gives one device per entry, type vnc by default #}
+{% set gbase = {'type': 'vnc' if __libvirt_vm_vm.vnc else 'none', 'listen': __libvirt_vm_vm.vnc_listen, 'port': -1} %}
+{% set glist = __libvirt_vm_vm.graphics is sequence and __libvirt_vm_vm.graphics is not string and __libvirt_vm_vm.graphics is not mapping %}
+{% set grs = [] %}
+{% for g in (__libvirt_vm_vm.graphics if glist else [__libvirt_vm_vm.graphics if __libvirt_vm_vm.graphics is mapping else {}]) %}
+{% set gr = gbase | combine({'type': 'vnc'} if glist else {}) | combine(g) %}
+{% if gr.type != 'none' %}{% set _ = grs.append(gr) %}{% endif %}
+{% endfor %}
+{% for gr in grs %}
     <graphics type='{{ gr.type }}' port='{{ gr.port }}' autoport='{{ 'yes' if gr.port == -1 else 'no' }}' listen='{{ gr.listen }}'{% if gr.password is defined %} passwd='{{ gr.password }}'{% endif %}>
       <listen type='address' address='{{ gr.listen }}'/>
     </graphics>
+{% endfor %}
+{# The SPICE agent channel: list form only, so a single mapping keeps its 1.1.0 XML #}
+{% if glist and grs | selectattr('type', 'equalto', 'spice') | list | length > 0 %}
+    <channel type='spicevmc'>
+      <target type='virtio' name='com.redhat.spice.0'/>
+    </channel>
+{% endif %}
+{% if grs | length > 0 %}
     <video>
       <model type='{{ __libvirt_vm_vm.video }}'/>
     </video>

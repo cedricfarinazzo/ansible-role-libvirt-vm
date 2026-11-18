@@ -34,7 +34,7 @@ __libvirt_vm_base:
     - hd
   bootmenu: false
   bios_useserial: false
-  # {type none|vnc|spice, listen, port (-1 = autoport), password}: replaces vnc and vnc_listen
+  # {type none|vnc|spice, listen, port (-1 = autoport), password}, or a list of them: replaces vnc and vnc_listen
   graphics: null
   video: virtio
   rng: false
@@ -303,5 +303,11 @@ __libvirt_vm_local_images: >-
 # A graphics password or cloud-init files anywhere: every task whose item holds a VM is no_log, or -v prints them
 __libvirt_vm_secret: >-
   {% set found = [] %}{% for v in ((libvirt_vm_vms if libvirt_vm_vms is sequence and libvirt_vm_vms is not string else []) + [libvirt_vm_defaults]) %}{%
-  if v is mapping and (('graphics' in v and v.graphics is mapping and 'password' in v.graphics) or 'cloud_init' in v) %}{%
+  if v is mapping and (('graphics' in v and ([v.graphics] if v.graphics is mapping else v.graphics if v.graphics is sequence and v.graphics is not string
+  else []) | select('mapping') | selectattr('password', 'defined') | list | length > 0) or 'cloud_init' in v) %}{%
   set _ = found.append(1) %}{% endif %}{% endfor %}{{ found | length > 0 }}
+# Each graphics mapping of each VM, as {name, g}: a single mapping or each mapping of a list
+__libvirt_vm_graphics_entries: >-
+  {% set out = [] %}{% for vm in libvirt_vm_vms %}{% set g = (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).graphics %}{%
+  for e in ([g] if g is mapping else g if g is sequence and g is not string else []) %}{% set _ = out.append({'name': vm.name, 'g': e}) %}{%
+  endfor %}{% endfor %}{{ out }}

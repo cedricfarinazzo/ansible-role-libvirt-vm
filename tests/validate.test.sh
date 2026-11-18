@@ -136,6 +136,11 @@ good "a USB hostdev" "$(hd '"type": "usb", "vendor": "0x1050", "product": "0x040
 good "spice graphics, port, password" "$(gr '"type": "spice", "listen": "0.0.0.0", "port": 5901, "password": "s3cr#t"')"
 good "no graphics" "$(gr '"type": "none"')"
 good "graphics from the defaults" '{"libvirt_vm_defaults": {"graphics": {"type": "vnc", "password": "s3cr#t"}}, "libvirt_vm_vms": [{"name": "a"}]}'
+gl() { echo "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"graphics\": [$1]}]}"; }
+good "a graphics list, VNC and SPICE" "$(gl '{"type": "vnc", "listen": "127.0.0.1"}, {"type": "spice", "listen": "127.0.0.1"}')"
+good "a graphics list, a password, fixed ports" "$(gl '{"port": 5901}, {"type": "spice", "port": 5902, "password": "s3cr#t"}')"
+good "a graphics list of one none" "$(gl '{"type": "none"}')"
+good "a graphics list from the defaults" '{"libvirt_vm_defaults": {"graphics": [{"type": "vnc"}, {"type": "spice"}]}, "libvirt_vm_vms": [{"name": "a"}]}'
 good "cloud-init, every file, own ISO" "$(ci '"enabled": true, "files": {"user-data": "#cloud-config\n", "meta-data": "instance-id: a\n", "network-config": "version: 2\n", "vendor-data": ""}, "iso": "/srv/seed/a.iso", "target": "sdy"')"
 good "cloud-init disabled, no files" "$(ci '"enabled": false')"
 bad "a bad UUID" "$(vm ', "uuid": "not-a-uuid"')"
@@ -239,6 +244,19 @@ bad "an unknown graphics key" "$(gr '"keymap": "fr"')"
 bad "a graphics type from the defaults that is unknown" '{"libvirt_vm_defaults": {"graphics": {"type": "rdp"}}, "libvirt_vm_vms": [{"name": "a"}]}'
 bad "a graphics password from the defaults with a quote" '{"libvirt_vm_defaults": {"graphics": {"type": "vnc", "password": "a'"'"'b"}}, "libvirt_vm_vms": [{"name": "a"}]}'
 bad "a graphics password from the defaults with a trailing newline" '{"libvirt_vm_defaults": {"graphics": {"type": "vnc", "password": "pw\n"}}, "libvirt_vm_vms": [{"name": "a"}]}'
+bad "an empty graphics list" "$(gl '')"
+bad "a graphics list holding a string" "$(gl '"vnc"')"
+bad "a graphics list with a type twice" "$(gl '{"type": "spice"}, {"type": "spice", "listen": "::1"}')"
+bad "a graphics list with two default VNC" "$(gl '{"listen": "127.0.0.1"}, {"listen": "::1"}')"
+bad "a graphics list with none and VNC" "$(gl '{"type": "none"}, {"type": "vnc"}')"
+bad "a graphics list with a fixed port twice" "$(gl '{"port": 5901}, {"type": "spice", "port": 5901}')"
+bad "a graphics list entry with an unknown key" "$(gl '{"type": "vnc"}, {"type": "spice", "keymap": "fr"}')"
+bad "a graphics list entry with an unknown type" "$(gl '{"type": "vnc"}, {"type": "rdp"}')"
+bad "a graphics list listen with a trailing newline" "$(gl '{"type": "vnc"}, {"type": "spice", "listen": "127.0.0.1\n"}')"
+bad "a graphics list listen with an embedded newline" "$(gl '{"type": "vnc", "listen": "127.0.0.1\n::1"}')"
+bad "a graphics list password with a trailing newline" "$(gl '{"type": "vnc"}, {"type": "spice", "password": "pw\n"}')"
+bad "a graphics list password with a carriage return" "$(gl '{"type": "spice", "password": "p\rw"}')"
+bad "a graphics list from the defaults with a type twice" '{"libvirt_vm_defaults": {"graphics": [{"type": "vnc"}, {"type": "vnc"}]}, "libvirt_vm_vms": [{"name": "a"}]}'
 bad "cloud-init as a boolean" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"cloud_init\": true}]}"
 bad "cloud-init with no enabled" "$(ci '"files": {"user-data": "x"}')"
 bad "cloud-init enabled as a string" "$(ci '"enabled": "yes", "files": {"user-data": "x"}')"
