@@ -40,7 +40,7 @@ Public Ansible role `cedricfarinazzo.libvirt_vm` (Ansible Galaxy): one libvirt d
 - **Every input checked before any change.** Every regex ends in `\Z`, never `$`, and lives in `vars/main.yml` (a Jinja literal unescapes `\`); bad cases feed trailing and embedded newlines.
 - **Never define, start or autostart a domain under Pacemaker:** `virsh` only in `define.yml`, imported when `libvirt_vm_pacemaker` is false; no `community.libvirt`. Every scenario but `autostart` lists `virsh list --all` and fails on any domain.
 - **1.0.0 inputs render the 1.0.0 XML:** a new key renders nothing at its default; the `regression` scenario compares bytes. Regenerate `files/` only for a breaking change.
-- **Secrets never printed:** seed files and a VM with a graphics password are `no_log`; the `cloudinit` and `graphics` side effects grep `-vvv --diff` output for them.
+- **Secrets never printed:** `-v` prints each loop item in full, so with a graphics password or `cloud_init` anywhere every task looping over VMs is `no_log: "{{ __libvirt_vm_secret }}"`; seed staging is always `no_log`. A new task looping over VMs takes the same line. The `cloudinit` and `graphics` side effects grep `-vvv --diff` output for the secret.
 - **An existing disk is data:** created only when missing (`creates:`), never resized or rewritten.
 - **No file under `/etc/libvirt` or `/var/lib/libvirt`:** an undefine deletes files there; `validate.yml` refuses those directories.
 - **The NVRAM file is the VM's state:** never removed by the role.

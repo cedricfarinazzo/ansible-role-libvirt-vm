@@ -15,6 +15,7 @@
     owner: root
     group: root
     mode: "0700"
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: >-
     {{ ([libvirt_vm_cloud_init_dir] if __libvirt_vm_cloud_init_vms | length > 0 else [])
        + __libvirt_vm_cloud_init_vms | map(attribute='name') | map('regex_replace', '^', libvirt_vm_cloud_init_dir ~ '/') | list }}
@@ -26,6 +27,7 @@
   ansible.builtin.file:
     path: "{{ __libvirt_vm_item }}"
     state: directory
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ __libvirt_vm_cloud_init_vms | map(attribute='cloud_init') | selectattr('iso', 'defined') | map(attribute='iso') | map('dirname') | unique | list }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -55,6 +57,7 @@
     path: "{{ libvirt_vm_cloud_init_dir }}/{{ __libvirt_vm_item[0].name }}/{{ __libvirt_vm_item[1] }}"
     state: absent
   register: __libvirt_vm_seed_gone
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ __libvirt_vm_cloud_init_vms | product(['network-config', 'vendor-data']) | list }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -66,6 +69,7 @@
     path: "{{ __libvirt_vm_item.cloud_init.iso | default(libvirt_vm_cloud_init_dir ~ '/' ~ __libvirt_vm_item.name ~ '-seed.iso') }}"
     get_checksum: false
   register: __libvirt_vm_isos
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ __libvirt_vm_cloud_init_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -78,6 +82,7 @@
       rm -f {{ __libvirt_vm_iso | quote }} && umask 077 &&
       xorrisofs -quiet -output {{ __libvirt_vm_iso | quote }} -volid cidata -joliet -rock
       {{ (libvirt_vm_cloud_init_dir ~ '/' ~ __libvirt_vm_item.0.name) | quote }}
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ __libvirt_vm_cloud_init_vms | zip(__libvirt_vm_isos.results) | list }}"
   loop_control:
     loop_var: __libvirt_vm_item

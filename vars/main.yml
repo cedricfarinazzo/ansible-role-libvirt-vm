@@ -296,3 +296,12 @@ __libvirt_vm_console_dirs: >-
 __libvirt_vm_define_vms: >-
   {% set out = [] %}{% for vm in libvirt_vm_vms %}{% set v = __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm) %}{%
   if v.state == 'present' and v.define %}{% set _ = out.append(v) %}{% endif %}{% endfor %}{{ out }}
+# Local images with a checksum: checked before a disk is made from them
+__libvirt_vm_local_images: >-
+  {% set out = [] %}{% for d in __libvirt_vm_created %}{% set src = d.backing_file | default(d.image | default('')) %}{%
+  if d.checksum is defined and src is not match('^https?://') %}{% set _ = out.append(d) %}{% endif %}{% endfor %}{{ out }}
+# A graphics password or cloud-init files anywhere: every task whose item holds a VM is no_log, or -v prints them
+__libvirt_vm_secret: >-
+  {% set found = [] %}{% for v in ((libvirt_vm_vms if libvirt_vm_vms is sequence and libvirt_vm_vms is not string else []) + [libvirt_vm_defaults]) %}{%
+  if v is mapping and (('graphics' in v and v.graphics is mapping and 'password' in v.graphics) or 'cloud_init' in v) %}{%
+  set _ = found.append(1) %}{% endif %}{% endfor %}{{ found | length > 0 }}

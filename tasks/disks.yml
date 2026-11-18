@@ -17,7 +17,8 @@
     mode: "0755"
   when: __libvirt_vm_urls | length > 0
 
-# Downloaded once per URL, kept by its checksum: a later run with the same checksum downloads nothing
+# Downloaded once per URL, kept by its checksum: a later run with the same checksum downloads nothing.
+# Skipped in check mode: get_url fails on a cache directory check mode did not create.
 - name: Remote images are downloaded and verified
   ansible.builtin.get_url:
     url: "{{ __libvirt_vm_item.key }}"
@@ -26,6 +27,7 @@
     owner: root
     group: root
     mode: "0644"
+  when: not ansible_check_mode
   loop: "{{ __libvirt_vm_urls | dict2items }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -39,8 +41,7 @@
   failed_when: >-
     not __libvirt_vm_local.stat.exists
     or __libvirt_vm_local.stat.checksum != __libvirt_vm_item.checksum.split(':')[1]
-  loop: "{{ __libvirt_vm_created | selectattr('checksum', 'defined') | rejectattr('backing_file', 'match', '^https?://')
-            | rejectattr('image', 'match', '^https?://') | list }}"
+  loop: "{{ __libvirt_vm_local_images }}"
   loop_control:
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.file }}"

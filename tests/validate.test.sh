@@ -22,9 +22,10 @@ fails=0
 run() { ANSIBLE_ROLES_PATH=$WORK/roles ansible-playbook -i localhost, -c local -e "$1" "$WORK/play.yml" > "$WORK/out" 2>&1; }
 good() { if run "$2"; then echo "ok   accepted: $1"; else echo "FAIL rejected a good input: $1" >&2; tail -5 "$WORK/out" >&2; fails=$((fails + 1)); fi; }
 # Rejected by an assert, never by a templating crash: that would pass for the wrong reason.
+# A run with a graphics password or cloud-init is no_log: its failure is censored.
 bad() {
   if run "$2"; then echo "FAIL accepted: $1" >&2; fails=$((fails + 1))
-  elif grep -qE '"assertion"|Action failed: ' "$WORK/out"; then echo "ok   rejected: $1"
+  elif grep -qE '"assertion"|Action failed: |"censored"' "$WORK/out"; then echo "ok   rejected: $1"
   else echo "FAIL failed without an assertion: $1" >&2; grep -m3 -E 'ERROR|fatal' "$WORK/out" >&2; fails=$((fails + 1)); fi
 }
 

@@ -40,8 +40,8 @@
 
     - name: The secret is in the ISO
       ansible.builtin.shell: >-
-        set -o pipefail; xorriso -osirrox on -indev /var/lib/libvirt_vm/cloud-init/vm1-seed.iso -extract /user-data /dev/stdout 2>/dev/null
-        | grep -c {{ molecule_secret }}
+        rm -f /tmp/molecule-user-data; xorriso -osirrox on -indev /var/lib/libvirt_vm/cloud-init/vm1-seed.iso
+        -extract /user-data /tmp/molecule-user-data 2>/dev/null; grep -c {{ molecule_secret }} /tmp/molecule-user-data
       args:
         executable: /bin/bash
       changed_when: false

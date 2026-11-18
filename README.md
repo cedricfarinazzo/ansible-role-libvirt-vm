@@ -206,7 +206,7 @@ graphics:
   password: "{{ vault_web_console_password }}"   # by variable; lands in the XML file (root 0600)
 ```
 
-A VM with a password renders `no_log`, so neither the password nor that file's diff is printed.
+When any VM (or `libvirt_vm_defaults`) has a graphics password or a `cloud_init` key, every task whose loop item holds a VM runs `no_log`, so `-v` and `--diff` print neither the secret nor the files. A validation failure then reads `censored`: find the bad input by running without the secrets, or with `no_log` off in a private run.
 
 ### Host devices
 

@@ -50,6 +50,7 @@
       {{ (__libvirt_vm_item.name | default('') if __libvirt_vm_item is mapping else __libvirt_vm_item) | string | to_json }}
       must match {{ __libvirt_vm_name_re }}; known keys: {{ __libvirt_vm_vm_keys | join(', ') }}
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -86,6 +87,7 @@
       type {{ __libvirt_vm_types | join('|') }}, machine {{ __libvirt_vm_machine_re }}, cpu_mode {{ __libvirt_vm_cpu_modes | join('|') }},
       firmware bios|efi, disks and interfaces lists, vnc/serial/guest_agent booleans, vnc_listen an IP address
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -151,6 +153,7 @@
       - __libvirt_vm_targets | length == __libvirt_vm_targets | unique | length
     fail_msg: "libvirt_vm_vms {{ __libvirt_vm_item.name }}: a disk target is used twice in {{ __libvirt_vm_targets | to_json }}"
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -249,6 +252,7 @@
       console_log an absolute path, hostdevs a list, xml_template a relative .j2 path; uuid_deterministic, bootmenu, bios_useserial, rng,
       console_log_append, define, autostart, start booleans; autostart and start need define
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -265,6 +269,7 @@
       libvirt_vm_vms {{ __libvirt_vm_vm.name }}: define, start and autostart must stay false while libvirt_vm_pacemaker is true
       (VirtualDomain runs the domain); set libvirt_vm_pacemaker false for a VM libvirt runs alone
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -292,7 +297,7 @@
   loop_control:
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.name }}"
-  no_log: "{{ __libvirt_vm_item.graphics.password is defined }}"
+  no_log: "{{ __libvirt_vm_secret }}"
   vars:
     __libvirt_vm_g: "{{ __libvirt_vm_item.graphics }}"
 

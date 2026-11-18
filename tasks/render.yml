@@ -39,7 +39,7 @@
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.name }}"
   # A graphics password lands in the file: that VM's diff and result stay out of the output
-  no_log: "{{ (__libvirt_vm_item.graphics | default(libvirt_vm_defaults.graphics | default(none))).password is defined }}"
+  no_log: "{{ __libvirt_vm_secret }}"
   register: __libvirt_vm_rendered
   vars:
     __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
