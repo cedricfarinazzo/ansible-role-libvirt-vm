@@ -4,7 +4,7 @@ dependency:
   command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
 driver:
   name: docker
-# Graphics: none, VNC on an address, SPICE on a fixed port with a password from a variable
+# Graphics: none, VNC on an address, SPICE on a fixed port with a password from a variable; lists of several devices
 platforms:
   - name: libvirt-vm-graphics-${MOLECULE_DISTRO:-debian13}
     hostname: vmhost
@@ -47,6 +47,20 @@ provisioner:
             video: qxl
           - name: legacy
             vnc_listen: "::1"
+          - name: both
+            graphics:
+              - listen: 127.0.0.1
+              - type: spice
+                listen: 127.0.0.1
+                port: 5902
+                password: "{{ molecule_spice_password }}"
+          - name: listnone
+            graphics:
+              - type: none
+          - name: listvnc
+            graphics:
+              - listen: 192.0.2.11
+            video: vga
 verifier:
   name: ansible
 scenario:

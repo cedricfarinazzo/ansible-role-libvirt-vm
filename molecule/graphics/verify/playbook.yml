@@ -1,5 +1,6 @@
 ---
-# Each VM renders its graphics type, listen, port and password; none renders no graphics or video.
+# Each VM renders its graphics type, listen, port and password; none renders no graphics or video;
+# a list renders one device per entry, one video, the SPICE channel only with a SPICE entry.
 - name: Verify
   hosts: vmhosts
   gather_facts: false
@@ -12,6 +13,9 @@
         - vnc
         - spice
         - legacy
+        - both
+        - listnone
+        - listvnc
 
     - name: None has no graphics
       ansible.builtin.include_tasks: ../../shared/xpath.yml
@@ -54,6 +58,8 @@
             value: "0.0.0.0"
           - xpath: "string(/domain/devices/video/model/@type)"
             value: "qxl"
+          - xpath: "count(/domain/devices/channel[@type='spicevmc'])"
+            value: "0"
 
     - name: The 1.0.0 vnc keys still work
       ansible.builtin.include_tasks: ../../shared/xpath.yml
@@ -64,6 +70,66 @@
             value: "vnc"
           - xpath: "string(/domain/devices/graphics/listen/@address)"
             value: "::1"
+
+    - name: A list of VNC and SPICE renders both, in order, one video, the SPICE channel
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/both.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/graphics)"
+            value: "2"
+          - xpath: "string(/domain/devices/graphics[1]/@type)"
+            value: "vnc"
+          - xpath: "string(/domain/devices/graphics[1]/@autoport)"
+            value: "yes"
+          - xpath: "string(/domain/devices/graphics[1]/listen/@address)"
+            value: "127.0.0.1"
+          - xpath: "count(/domain/devices/graphics[1]/@passwd)"
+            value: "0"
+          - xpath: "string(/domain/devices/graphics[2]/@type)"
+            value: "spice"
+          - xpath: "string(/domain/devices/graphics[2]/@port)"
+            value: "5902"
+          - xpath: "string(/domain/devices/graphics[2]/@autoport)"
+            value: "no"
+          - xpath: "string(/domain/devices/graphics[2]/@passwd)"
+            value: "molecule-pw-8d2e"
+          - xpath: "string(/domain/devices/graphics[2]/listen/@address)"
+            value: "127.0.0.1"
+          - xpath: "count(/domain/devices/video)"
+            value: "1"
+          - xpath: "string(/domain/devices/video/model/@type)"
+            value: "virtio"
+          - xpath: "string(/domain/devices/channel[@type='spicevmc']/target/@name)"
+            value: "com.redhat.spice.0"
+
+    - name: A list of one none has no graphics, video or SPICE channel
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/listnone.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/graphics)"
+            value: "0"
+          - xpath: "count(/domain/devices/video)"
+            value: "0"
+          - xpath: "count(/domain/devices/channel[@type='spicevmc'])"
+            value: "0"
+
+    - name: A list entry without a type is VNC, no SPICE channel
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/listvnc.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/graphics)"
+            value: "1"
+          - xpath: "string(/domain/devices/graphics/@type)"
+            value: "vnc"
+          - xpath: "string(/domain/devices/graphics/listen/@address)"
+            value: "192.0.2.11"
+          - xpath: "string(/domain/devices/video/model/@type)"
+            value: "vga"
+          - xpath: "count(/domain/devices/channel[@type='spicevmc'])"
+            value: "0"
 
     - name: The role defined no domain
       ansible.builtin.include_tasks: ../../shared/no_domain.yml

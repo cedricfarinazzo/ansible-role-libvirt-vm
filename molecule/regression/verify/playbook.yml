@@ -1,5 +1,5 @@
 ---
-# Each file equals, byte for byte, the one tag 1.0.0 rendered from the same inputs.
+# Each file equals, byte for byte, the one its tag (1.0.0, or 1.1.0 for g*) rendered from the same inputs.
 - name: Verify
   hosts: vmhosts
   gather_facts: false
@@ -12,6 +12,9 @@
         - db.example
         - tiny
         - uefi
+        - gvnc
+        - gspice
+        - gnone
     - name: Read the files
       ansible.builtin.slurp:
         path: /etc/libvirt_vm/{{ item }}.xml
@@ -23,8 +26,11 @@
           - db.example
           - tiny
           - uefi
+          - gvnc
+          - gspice
+          - gnone
 
-    - name: Each file is the 1.0.0 one
+    - name: Each file is the one its tag rendered
       ansible.builtin.assert:
         that: item.content | b64decode == lookup('ansible.builtin.file', playbook_dir ~ '/../files/' ~ item.item ~ '.xml', rstrip=false)
         fail_msg: "{{ item.item }}: {{ item.content | b64decode }}"
