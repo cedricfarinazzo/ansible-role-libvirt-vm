@@ -172,6 +172,141 @@ Every key below was added in 1.1.0; at its default it renders exactly what 1.0.0
 
 The boot order is the ordered `boot` list (`<os><boot dev=.../>`); the role does not use per-device `<boot order=>`, which libvirt refuses next to it.
 
+### Role Variables
+
+Every value is checked before any change; a bad one fails the run naming the input. Text values are matched to the end (a trailing or embedded newline is refused). "Shape" is what validation accepts: the role does not ask libvirt or QEMU whether a value exists on your host.
+
+#### Role-level variables
+
+| Variable | Default | Allowed | What it does |
+|----------|---------|---------|--------------|
+| `libvirt_vm_vms` | `[]` | list of VM mappings | The VMs. Names are unique; MACs are unique across VMs. |
+| `libvirt_vm_defaults` | `{}` | mapping of the per-VM keys below, without `name` | Applied to every VM; a VM's own key wins. Checked like a VM's own keys. |
+| `libvirt_vm_xml_dir` | `/etc/libvirt_vm` | absolute path of `A-Za-z0-9_.:+/-`, no `.` or `..` segment, not under `/etc/libvirt` or `/var/lib/libvirt` | Where `<name>.xml` goes (root `0700`). Outside libvirt's directories because an undefine deletes files there. |
+| `libvirt_vm_ovmf_code`, `libvirt_vm_ovmf_vars` | OVMF 4M files of Debian and Ubuntu | absolute path (same shape) | EFI loader and NVRAM template for `firmware: efi`. Point to the `.ms.` files for Secure Boot with Microsoft keys. |
+| `libvirt_vm_nvram_dir` | `/var/lib/libvirt_vm/nvram` | absolute path, not under `/etc/libvirt` or `/var/lib/libvirt` | Per-VM `<name>_VARS.fd`, copied from the template at first start; never removed by the role. Put it on shared storage for a VM that moves between nodes. |
+| `libvirt_vm_validate` | `true` | boolean | `true`: each file passes `virt-xml-validate` before it is written. `false`: no check, no package. |
+| `libvirt_vm_packages` | `[libvirt-clients]` | list | Installed when `libvirt_vm_validate` is true. `[]` installs nothing. |
+| `libvirt_vm_pacemaker` | `true` | boolean | `true`: Pacemaker's VirtualDomain runs the domains; the role refuses `define`, `start`, `autostart` and never calls `virsh`. `false`: libvirt alone runs them, see Pacemaker, define and autostart. |
+| `libvirt_vm_uri` | `qemu:///system` | `qemu[+transport]://[host]/system` or `/session` | virsh's connection; used with `libvirt_vm_pacemaker: false` only. |
+| `libvirt_vm_image_cache_dir` | `/var/cache/libvirt_vm` | absolute path | Downloaded images, named `<checksum>-<file name>`. A run with the same checksum downloads nothing. |
+| `libvirt_vm_cloud_init_dir` | `/var/lib/libvirt_vm/cloud-init` | absolute path, not under libvirt's directories | Staged seed files and the default `<name>-seed.iso`. |
+| `libvirt_vm_disk_packages` | `[qemu-utils]` | list | Installed only when a disk is created. |
+| `libvirt_vm_cloud_init_packages` | `[xorriso]` | list | Installed only when a VM has `cloud_init.enabled`. |
+
+#### Per-VM keys
+
+| Key | Default | Allowed | What it does and when to pick it |
+|-----|---------|---------|----------------------------------|
+| `name` | required | `[A-Za-z0-9][A-Za-z0-9_.-]`, up to 63 characters | The domain name and the file name. |
+| `state` | `present` | `present`, `absent` | `absent` removes the XML file, the staged seed files and the default-path seed ISO; disks and NVRAM are kept. With `libvirt_vm_pacemaker: false` it also stops and undefines the domain. |
+| `memory_mib` | `1024` | integer, 16 or more | Guest RAM in MiB (also the current memory). |
+| `vcpus` | `1` | integer, 1-512 | Virtual CPUs. |
+| `type` | `kvm` | `kvm`, `qemu` | `kvm`: hardware acceleration, needs `/dev/kvm` on the host; use it on real hosts. `qemu`: software emulation (TCG), slow, for hosts without KVM (containers, CI) and for another `arch` than the host. |
+| `machine` | `q35` | `[a-z0-9][a-z0-9_.-]`, up to 64 characters | The QEMU machine type; only its shape is checked, list valid ones with `qemu-system-x86_64 -machine help`. `q35`: modern x86_64 chipset (PCIe), the default. `pc`: the older i440fx chipset, for old guests. A versioned name (`pc-q35-9.2`) pins the guest hardware ABI: pick it for VMs live-migrated between hosts with different QEMU versions, so every host presents the same hardware. `virt`: the machine for `aarch64`. |
+| `cpu_mode` | `host-passthrough` | `host-passthrough`, `host-model`, `maximum`, `none` | `host-passthrough`: the guest sees the host CPU exactly; fastest, but live migration needs identical CPUs. `host-model`: a named CPU model close to the host's; migratable across similar hosts. `maximum`: every feature QEMU can offer; the choice with `type: qemu`. `none`: no `<cpu>` element, libvirt's default for the machine. |
+| `firmware` | `bios` | `bios`, `efi` | `bios`: SeaBIOS. `efi`: OVMF loader plus a per-VM NVRAM file (needs the `ovmf` package). See EFI. |
+| `arch` | `x86_64` | `x86_64`, `aarch64` | Guest architecture. For `aarch64` also set `machine: virt` and the AAVMF firmware paths; it needs `type: qemu` on an x86_64 host. |
+| `emulator` | `null` | absolute path | The QEMU binary, e.g. `/usr/bin/qemu-system-x86_64`. `null`: libvirt picks it. |
+| `uuid` | `null` | `8-4-4-4-12` hex digits | A fixed UUID, kept across a redefinition. Wins over `uuid_deterministic`. |
+| `uuid_deterministic` | `false` | boolean | `true` (and no `uuid`): the UUID is derived from the name, the same on every host and run. `false` with no `uuid`: libvirt generates one at define time. |
+| `clock_offset` | `utc` | `utc`, `localtime` | The guest's hardware clock. `localtime` for Windows guests, which keep local time in the RTC. |
+| `boot` | `[hd]` | non-empty list of distinct `hd`, `cdrom`, `network` | Boot devices in order: the firmware tries the first, then the next. The order is kept in `<os><boot dev=/>`. The role does not use per-device `<boot order=>`: libvirt refuses it next to `<os><boot>`. `[cdrom, hd]` installs from a cdrom and then boots the disk. |
+| `bootmenu` | `false` | boolean | `true`: the firmware's boot menu is shown at start. |
+| `bios_useserial` | `false` | boolean | `true`: SeaBIOS prints on the serial console (useful with `console_log`). BIOS only. |
+| `disks` | `[]` | list of mappings, see below | The disks, in the order given. |
+| `interfaces` | `[]` | list of mappings, see below | The network interfaces. |
+| `vnc` | `true` | boolean | 1.0.0 key: `true` gives a VNC console on `vnc_listen`; `false` none. Ignored when `graphics` is set. |
+| `vnc_listen` | `127.0.0.1` | IPv4 or IPv6 address | 1.0.0 key: the address the VNC console listens on; see Graphics. Ignored when `graphics` is set. |
+| `graphics` | `null` | mapping, see below | The console. When set it replaces `vnc` and `vnc_listen`. |
+| `video` | `virtio` | `virtio`, `vga`, `qxl`, `bochs`, `none` | The video device, rendered only when graphics is not `none`. `virtio`: the default for Linux guests. `vga`: the most compatible, for guests without virtio-gpu drivers. `qxl`: the SPICE-optimised device. `bochs`: a simple framebuffer for UEFI guests. `none`: no video model. |
+| `serial` | `true` | boolean | A pty serial console, reached with `virsh console`. |
+| `console_log` | `null` | absolute path | The serial console is written to this file instead of a pty (its directory is created `0750`). |
+| `console_log_append` | `false` | boolean | `true`: keep the file across restarts and append. `false`: truncated at each start. |
+| `guest_agent` | `true` | boolean | Adds the `org.qemu.guest_agent.0` virtio-serial channel; the agent in the guest then answers `virsh domifaddr --source agent` and clean shutdowns. |
+| `rng` | `false` | boolean | `true`: a virtio-rng device fed by the host's `/dev/urandom`; gives guests entropy at boot. |
+| `hostdevs` | `[]` | list of mappings, see below | PCI and USB devices of the host given to the guest. |
+| `cloud_init` | `{enabled: false}` | mapping, see below | A NoCloud seed ISO attached as a read-only cdrom. |
+| `xml_template` | `null` | relative path ending `.j2` | Your own template instead of `domain.xml.j2`, given the same variables. The role's validation still runs on its inputs, not on your template. |
+| `define` | `false` | boolean | `libvirt_vm_pacemaker: false` only: `virsh define` the file (again when it changes). |
+| `autostart` | `false` | boolean | `libvirt_vm_pacemaker: false` only, needs `define`: libvirt starts the domain at host boot. Keep `false` under Pacemaker: the cluster owns the start, and a libvirt autostart would run the same disk on two nodes. |
+| `start` | `false` | boolean | `libvirt_vm_pacemaker: false` only, needs `define`: start the domain when it is not running. |
+
+#### Disk keys
+
+A disk has exactly one of `dev` and `file`, and a `target`.
+
+| Key | Default | Allowed | What it does and when to pick it |
+|-----|---------|---------|----------------------------------|
+| `dev` | none | `/dev/...` of `A-Za-z0-9_.:+/-`, no `.` or `..` segment | A block device (LVM, DRBD, a LINSTOR resource). Never created by the role. |
+| `file` | none | absolute path (same shape) | An image file. Created by the role only when `size`, `backing_file` or `image` is given and the file is missing. |
+| `target` | required | `vd`, `sd` or `hd` plus 1-2 letters, unique in the VM | The guest device name, and the order within a bus. Pair it with `bus`: `vd*` for virtio. |
+| `format` | `raw` | `raw`, `qcow2` | `raw`: no overhead, for block devices. `qcow2`: for files with snapshots, overlays or thin growth. |
+| `bus` | `virtio` | `virtio`, `sata`, `scsi`, `usb` | `virtio`: fastest, needs guest drivers (every Linux). `sata`: the compatible choice for installers and cdroms. `scsi`: many disks, needs a SCSI controller in the guest. `usb`: removable media. |
+| `cache` | `none` | `none`, `default`, `writeback`, `writethrough`, `directsync`, `unsafe` | `none`: bypass the host page cache; the right choice for replicated storage (DRBD) and for live migration. `writeback`: fast, data in the host cache is lost on a host crash. `writethrough`: reads cached, writes synced. `directsync`: no cache and every write synced, slowest. `unsafe`: ignores flushes, only for throwaway VMs. `default`: QEMU's own default. |
+| `io` | `null` | `native`, `threads`, `io_uring` | The asynchronous I/O mode. `null`: libvirt's choice. `native`: Linux AIO, with `cache: none` on block devices. `threads`: portable, works with cached files. `io_uring`: lowest overhead on a recent kernel. |
+| `discard` | `unmap` | `unmap`, `ignore` | `unmap`: the guest's TRIM frees blocks on thin volumes and sparse files. `ignore`: never frees. Not rendered for a cdrom. |
+| `device` | `disk` | `disk`, `cdrom` | `cdrom` is always read-only and cannot be created by the role. |
+| `readonly` | `false` | boolean | `true`: the guest cannot write; use it for a shared image. |
+| `size` | none | `1-9 digits` plus optional `K`, `M`, `G`, `T` | Virtual size. With no `backing_file`/`image`, an empty disk of this size is created when the file is missing. |
+| `backing_file` | none | absolute path or `http(s)://` URL | A qcow2 overlay on this base image (`format: qcow2` and `size` required). The base stays untouched and shared; the overlay holds the VM's changes. Created only when missing. |
+| `backing_format` | `qcow2` | `raw`, `qcow2` | The format of the base image; only with `backing_file`. Cloud images are usually `qcow2`. |
+| `image` | none | absolute path or `http(s)://` URL | A full independent copy of the image into `file`, converted to `format`, then grown to `size` when given. Created only when missing. Exclusive with `backing_file`. |
+| `checksum` | none | `sha256:` plus 64 hex or `sha512:` plus 128 hex | Verifies the source image. Required with a URL; optional (checked before use) with a local path. A mismatch fails before any disk or XML is written. |
+
+An existing disk file is the VM's data: later changes to `size`, `backing_file` or `image` do nothing to it.
+
+#### Interface keys
+
+`mac` is required for every interface (a stable address keeps the guest's NIC identity) and must be a unicast MAC.
+
+| Key | Default | Allowed | What it does and when to pick it |
+|-----|---------|---------|----------------------------------|
+| `type` | `bridge` | `bridge`, `network`, `direct` | `bridge`: attach to an existing Linux bridge (`bridge`). `network`: a libvirt network (`network`). `direct`: a macvtap on a host NIC (`dev`, `mode`), no bridge needed but the host cannot talk to the guest through it. The key of the chosen type is required, the others are refused. |
+| `bridge` | none | `A-Za-z0-9_.-`, up to 15 characters | The bridge name, `type: bridge`. |
+| `network` | none | a name like a VM name | The libvirt network, `type: network`. |
+| `dev` | none | `A-Za-z0-9_.-`, up to 15 characters | The host NIC, `type: direct`. |
+| `mode` | `vepa` | `vepa`, `bridge`, `private`, `passthrough` | `type: direct` only. `vepa`: traffic goes out to the switch even between guests (needs a switch that reflects). `bridge`: guests on the same NIC talk directly. `private`: guests cannot talk to each other. `passthrough`: the guest takes the whole NIC (one guest per NIC). |
+| `mac` | required | `xx:xx:xx:xx:xx:xx`, even first octet, upper or lower case | The guest MAC, stored lower-case; unique across VMs. |
+| `model` | `virtio` | `virtio`, `e1000e`, `e1000`, `rtl8139` | `virtio`: fastest, needs guest drivers. `e1000e`, `e1000`: emulated Intel NICs for guests without virtio. `rtl8139`: the oldest guests. |
+| `driver` | `null` | mapping `{name, queues}` | Host-side backend for a virtio NIC. `name: vhost`: packets handled in the host kernel (fast, the usual choice); `name: qemu`: handled in the QEMU process (needed in some restricted setups). `queues` 1-256: multiqueue, set it to the guest's vCPU count for high throughput, and enable it in the guest with `ethtool -L`. |
+| `alias` | `null` | `A-Za-z0-9_-`, up to 32 characters | Rendered `ua-<alias>`: a stable device alias (libvirt keeps only `ua-` aliases). |
+| `name` | `null` | like `bridge`, not starting `vnet`, `macvtap` or `macvlan` | The host tap device name, instead of a generated `vnetN`; useful for firewall and monitoring rules. |
+| `trust_guest_rx_filters` | `false` | boolean | `true`: the host applies the guest's MAC and VLAN filter changes. Needed for some SR-IOV and macvtap setups; it lets the guest change what it receives, so keep it off for untrusted guests. |
+
+#### Graphics keys
+
+The console is served by the QEMU process on the host, not inside the guest: `listen` is an address of the host. Ports start at 5900 (display `:0` is 5900, `:1` is 5901); with `port: -1` libvirt takes the next free one, and `virsh vncdisplay <name>` (or `virsh domdisplay`) prints which. With `127.0.0.1` the console is reachable only on the host: use an SSH tunnel (`ssh -L 5900:127.0.0.1:5900 host`). `0.0.0.0` (or a LAN address) exposes it to the network; set a `password` then.
+
+| Key | Default | Allowed | What it does |
+|-----|---------|---------|--------------|
+| `type` | `vnc` (`none` when `vnc: false`) | `none`, `vnc`, `spice` | `none`: no graphics device and no video (headless, serial only). `vnc`: any VNC client. `spice`: SPICE client; better with `video: qxl`, clipboard and USB redirection. |
+| `listen` | `vnc_listen` (`127.0.0.1`) | IPv4 or IPv6 address | The host address to bind. |
+| `port` | `-1` | `-1` or an integer 5900-65535 | `-1`: autoport from 5900. A fixed port must be free on the host and distinct per VM. |
+| `password` | none | 1-64 characters of `A-Za-z0-9` and ``!#$%()*+,./:;=?@^_{|}~-`` | The console password. Give it through a vaulted variable; it is written into the XML file (root `0600`) and never printed. |
+
+#### Host device keys
+
+| Key | Default | Allowed | What it does |
+|-----|---------|---------|--------------|
+| `type` | required | `pci`, `usb` | `pci`: a PCIe device (a NIC, a GPU, an HBA). `usb`: a USB device by id. |
+| `source` | required for `pci` | `dddd:bb:ss.f`, as `lspci -D` prints | The device's address on the host. |
+| `vendor`, `product` | required for `usb` | `0x` plus 4 hex digits | The ids `lsusb` prints (`ID vendor:product`). |
+| `destination` | `null` | `dddd:bb:ss.f` | The address the guest sees; `null`: libvirt assigns one. |
+| `alias` | `null` | like an interface alias | Rendered `ua-<alias>`. |
+| `managed` | `true` | boolean | `true`: libvirt detaches the device from its host driver and binds `vfio-pci` at start, then gives it back. `false`: you bind it to `vfio-pci` yourself beforehand and libvirt only attaches it; pick it when the device must never return to a host driver. |
+
+#### Cloud-init keys
+
+| Key | Default | Allowed | What it does |
+|-----|---------|---------|--------------|
+| `enabled` | `false` | boolean | `true`: build a NoCloud seed ISO (volume id `cidata`) and attach it as a read-only cdrom. `false`: no cdrom, no ISO built. |
+| `files` | `{}` | mapping of `user-data`, `meta-data`, `network-config`, `vendor-data` to strings | The seed content; `user-data` is required when enabled. `meta-data` defaults to `instance-id` and `local-hostname` set to the VM name. A file left out is removed from the seed. The ISO is rebuilt only when a file changes. |
+| `iso` | `libvirt_vm_cloud_init_dir/<name>-seed.iso` | absolute path, not under libvirt's directories | Where the ISO lives; set it to put the seed on replicated storage, so a VM that moves between nodes finds it. An ISO at your own path is never removed by the role. |
+| `target` | `sdz` | like a disk `target` | The cdrom's device name (sata bus); unique among the VM's disk targets. |
+
+Seed content may hold passwords and keys: every task that handles it runs `no_log` and the staged files and the ISO are root `0600`. Pass secrets through vaulted variables, never inline.
+
 ### Pacemaker, define and autostart
 
 With `libvirt_vm_pacemaker: true` (the default) `define`, `start` and `autostart` must stay `false`: validation refuses them. VirtualDomain undefines the domain before each start and starts it itself; a libvirt autostart would start the VM on a node at boot while Pacemaker starts it on another, and the same disk would run twice. Set `libvirt_vm_pacemaker: false` only for VMs that libvirt alone runs: each VM with `define: true` is defined from its file (again when the file changes), `autostart` is set as asked, `start: true` starts it if it is not running, and a VM set `absent` is stopped and undefined with `--keep-nvram`.
