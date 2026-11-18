@@ -282,10 +282,6 @@ __libvirt_vm_created: >-
   {% set out = [] %}{% for vm in libvirt_vm_vms %}{% set v = __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm) %}{%
   if v.state == 'present' %}{% for d in v.disks %}{% if d.file is defined and (d.size is defined or d.backing_file is defined or d.image is defined) %}{%
   set _ = out.append(__libvirt_vm_disk_defaults | combine(d)) %}{% endif %}{% endfor %}{% endif %}{% endfor %}{{ out }}
-# Remote images (backing_file or image an http(s) URL): downloaded once into libvirt_vm_image_cache_dir
-__libvirt_vm_urls: >-
-  {% set out = {} %}{% for d in __libvirt_vm_created %}{% for k in ['backing_file', 'image'] %}{% if d[k] is defined and d[k] is match('^https?://') %}{%
-  set _ = out.update({d[k]: d.checksum}) %}{% endif %}{% endfor %}{% endfor %}{{ out }}
 __libvirt_vm_cloud_init_vms: >-
   {% set out = [] %}{% for vm in libvirt_vm_vms %}{% set v = __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm) %}{%
   if v.state == 'present' and v.cloud_init.enabled %}{% set _ = out.append(v) %}{% endif %}{% endfor %}{{ out }}

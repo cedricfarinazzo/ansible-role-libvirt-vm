@@ -189,8 +189,8 @@ Every value is checked before any change; a bad one fails the run naming the inp
 | `libvirt_vm_packages` | `[libvirt-clients]` | list | Installed when `libvirt_vm_validate` is true. `[]` installs nothing. |
 | `libvirt_vm_pacemaker` | `true` | boolean | `true`: Pacemaker's VirtualDomain runs the domains; the role refuses `define`, `start`, `autostart` and never calls `virsh`. `false`: libvirt alone runs them, see Pacemaker, define and autostart. |
 | `libvirt_vm_uri` | `qemu:///system` | `qemu[+transport]://[host]/system` or `/session` | virsh's connection; used with `libvirt_vm_pacemaker: false` only. |
-| `libvirt_vm_image_cache_dir` | `/var/cache/libvirt_vm` | absolute path | Downloaded images, named `<checksum>-<file name>`. A run with the same checksum downloads nothing. |
-| `libvirt_vm_cloud_init_dir` | `/var/lib/libvirt_vm/cloud-init` | absolute path, not under libvirt's directories | Staged seed files and the default `<name>-seed.iso`. |
+| `libvirt_vm_image_cache_dir` | `/var/cache/libvirt_vm` | absolute path | Downloaded images, named `<checksum>-<file name>`. Only a missing disk's image is downloaded; a copied `image` is removed once its disks exist, a `backing_file` stays (its overlays read it). |
+| `libvirt_vm_cloud_init_dir` | `/var/lib/libvirt_vm/cloud-init` | absolute path, not under libvirt's directories | Staged seed files and the default `<name>-seed.iso`. Root `0711`: qemu traverses it to open the ISO, nobody else lists it; each VM's staging directory is root `0700`. |
 | `libvirt_vm_disk_packages` | `[qemu-utils]` | list | Installed only when a disk is created. |
 | `libvirt_vm_cloud_init_packages` | `[xorriso]` | list | Installed only when a VM has `cloud_init.enabled`. |
 
@@ -305,7 +305,7 @@ The console is served by the QEMU process on the host, not inside the guest: `li
 | `iso` | `libvirt_vm_cloud_init_dir/<name>-seed.iso` | absolute path, not under libvirt's directories | Where the ISO lives; set it to put the seed on replicated storage, so a VM that moves between nodes finds it. An ISO at your own path is never removed by the role. |
 | `target` | `sdz` | like a disk `target` | The cdrom's device name (sata bus); unique among the VM's disk targets. |
 
-Seed content may hold passwords and keys: every task that handles it runs `no_log` and the staged files and the ISO are root `0600`. Pass secrets through vaulted variables, never inline.
+Seed content may hold passwords and keys: every task that handles it runs `no_log` and the staged files and the ISO are root `0600` (libvirt hands the ISO to the qemu user at start), the staging directories `0700`, `libvirt_vm_cloud_init_dir` `0711` so qemu can reach the ISO without listing it. Pass secrets through vaulted variables, never inline.
 
 ### Pacemaker, define and autostart
 
@@ -313,7 +313,7 @@ With `libvirt_vm_pacemaker: true` (the default) `define`, `start` and `autostart
 
 ### Disks from images
 
-A file disk with `size`, `backing_file` or `image` is created when its file is missing, and never touched after: a later size or image change does nothing to an existing disk. A URL is downloaded once into `libvirt_vm_image_cache_dir`, named by its checksum, and verified with it; a local image with a `checksum` is checked before use. A wrong checksum fails the run before any disk or XML is written. Private images (credentials) are out of scope: download them yourself and give the path.
+A file disk with `size`, `backing_file` or `image` is created when its file is missing, and never touched after: a later size or image change does nothing to an existing disk. A URL is downloaded into `libvirt_vm_image_cache_dir` only when a disk that needs it is missing, named by its checksum and verified with it; a copied `image` is removed after the copy, a `backing_file` is kept; a local image with a `checksum` is checked before use. A wrong checksum fails the run before any disk or XML is written. Private images (credentials) are out of scope: download them yourself and give the path.
 
 ### Cloud-init
 
@@ -498,8 +498,8 @@ tests/validate.test.sh                   # the input checks
 | `failure` | Define or autostart under Pacemaker, a bad, multicast or duplicate MAC, a name with a space, a trailing or embedded newline, a duplicate name, a `..` disk path, a newline in `vnc_listen`, an unknown key, the XML directory under `/var/lib/libvirt`: each fails with a message naming the input, nothing written |
 | `regression` | The 1.0.0 inputs (four VMs, BIOS and EFI) and the 1.1.0 graphics mappings (VNC on a fixed port, SPICE with a password, none) render files equal byte for byte to the ones their tag rendered (`files/`); idempotence |
 | `disks` | File, block and cdrom disks, read-only, cache, io and discard, four targets in list order (XPath); disks created by `qemu-img` at their format and size; an existing disk keeps its data and size on a rerun with another size |
-| `backing` | A local backing file and a backing URL (a local HTTP server) under qcow2 overlays, a full copy from a URL grown to its size; the URL used by two disks downloaded once; with the server stopped a rerun changes nothing (cache); a wrong checksum fails, no disk and no XML written |
-| `cloudinit` | Seed ISOs with volume id `cidata` and exactly the given files, meta-data defaulting to the name, ISO `0600`, a read-only sata cdrom in the XML, an ISO at a path of its own; `enabled: false`: no cdrom, no ISO; a changed user-data rebuilds that ISO only and its secret never appears at `-vvv --diff`; then a rerun changes nothing; set absent, the staged files and default ISO removed, an ISO at its own path kept |
+| `backing` | A local backing file and a backing URL (a local HTTP server) under qcow2 overlays, a full copy from a URL grown to its size; each URL downloaded once, the copied image removed from the cache, the backing file kept; with the server stopped a rerun downloads nothing and changes nothing; a wrong checksum fails, no disk and no XML written |
+| `cloudinit` | Seed ISOs with volume id `cidata` and exactly the given files, meta-data defaulting to the name, ISO `0600`, seed directory `0711` and staging `0700`, the qemu user reaches the ISO but lists neither, a read-only sata cdrom in the XML, an ISO at a path of its own; `enabled: false`: no cdrom, no ISO; a changed user-data rebuilds that ISO only and its secret never appears at `-vvv --diff`; then a rerun changes nothing; set absent, the staged files and default ISO removed, an ISO at its own path kept |
 | `nics` | Bridge, network and direct interfaces in list order, MAC lower-cased, model, driver name and queues, alias, tap name, trustGuestRxFilters (XPath) |
 | `hostdevs` | PCI by host address with a guest address and alias, unmanaged PCI, USB by vendor and product: each attribute exact (XPath) |
 | `graphics` | `none` (no graphics, no video), VNC on an address, SPICE on a fixed port with a password from a variable, the 1.0.0 `vnc_listen` still honoured; a list of VNC and SPICE renders both in order with one video and the SPICE channel, a list of one `none` nothing, a list entry without a type VNC; a changed password rewrites the files and appears nowhere at `-vvv --diff`, nor a password held only in a list |

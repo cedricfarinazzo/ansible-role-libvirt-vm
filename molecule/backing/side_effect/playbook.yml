@@ -1,5 +1,5 @@
 ---
-# The cache serves a rerun with the server gone; a wrong checksum fails, writing no disk and no XML.
+# A rerun with the server gone downloads nothing (the copied image is no longer cached); a wrong checksum fails, writing no disk and no XML.
 - name: Cache and checksum
   hosts: vmhosts
   gather_facts: false
@@ -15,7 +15,7 @@
         molecule_args: []
         molecule_expect: ok
 
-    - name: The cache served it, nothing changed
+    - name: Every disk present, nothing downloaded, nothing changed
       ansible.builtin.assert:
         that: molecule_run.stdout is search('changed=0 ')
         fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"

@@ -8,19 +8,28 @@
     - __libvirt_vm_cloud_init_vms | length > 0
     - libvirt_vm_cloud_init_packages | length > 0
 
-- name: The seed directories exist, root only
+# 0711: qemu must traverse it to open <name>-seed.iso (libvirt chowns the ISO, never its directory); no listing
+- name: The seed directory exists, traversable, not listable
   ansible.builtin.file:
-    path: "{{ __libvirt_vm_item }}"
+    path: "{{ libvirt_vm_cloud_init_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+  when: __libvirt_vm_cloud_init_vms | length > 0
+
+- name: The staging directories exist, root only
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_cloud_init_dir }}/{{ __libvirt_vm_item.name }}"
     state: directory
     owner: root
     group: root
     mode: "0700"
   no_log: "{{ __libvirt_vm_secret }}"
-  loop: >-
-    {{ ([libvirt_vm_cloud_init_dir] if __libvirt_vm_cloud_init_vms | length > 0 else [])
-       + __libvirt_vm_cloud_init_vms | map(attribute='name') | map('regex_replace', '^', libvirt_vm_cloud_init_dir ~ '/') | list }}
+  loop: "{{ __libvirt_vm_cloud_init_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
 
 # An ISO placed elsewhere (a replicated volume): its directory's existing mode is left alone
 - name: The directory of each ISO placed elsewhere exists  # noqa risky-file-permissions
