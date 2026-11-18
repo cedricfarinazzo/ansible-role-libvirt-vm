@@ -232,7 +232,7 @@ The defaults are the OVMF files of Debian 13 and Ubuntu (package `ovmf`). For Se
 
 ### Removal
 
-`state: absent` (on the VM, or `libvirt_vm_defaults: {state: absent}` for all) removes `<name>.xml`. Remove the Pacemaker resource first: VirtualDomain cannot start a VM without its file. A VM dropped from `libvirt_vm_vms` keeps its file: set it `absent` for one run before dropping it.
+`state: absent` (on the VM, or `libvirt_vm_defaults: {state: absent}` for all) removes `<name>.xml`, and its staged seed files and `<name>-seed.iso` in `libvirt_vm_cloud_init_dir` (an ISO at its own `cloud_init.iso` path is left to you); disk files are never removed. Remove the Pacemaker resource first: VirtualDomain cannot start a VM without its file. A VM dropped from `libvirt_vm_vms` keeps its file: set it `absent` for one run before dropping it.
 
 ## 🎯 Usage Examples
 
@@ -352,7 +352,7 @@ tests/validate.test.sh                   # the input checks
 | `regression` | The 1.0.0 inputs (four VMs, BIOS and EFI) render files equal byte for byte to the ones tag 1.0.0 rendered (`files/`); idempotence |
 | `disks` | File, block and cdrom disks, read-only, cache, io and discard, four targets in list order (XPath); disks created by `qemu-img` at their format and size; an existing disk keeps its data and size on a rerun with another size |
 | `backing` | A local backing file and a backing URL (a local HTTP server) under qcow2 overlays, a full copy from a URL grown to its size; the URL used by two disks downloaded once; with the server stopped a rerun changes nothing (cache); a wrong checksum fails, no disk and no XML written |
-| `cloudinit` | Seed ISOs with volume id `cidata` and exactly the given files, meta-data defaulting to the name, ISO `0600`, a read-only sata cdrom in the XML, an ISO at a path of its own; `enabled: false`: no cdrom, no ISO; a changed user-data rebuilds that ISO only and its secret never appears at `-vvv --diff`; then a rerun changes nothing |
+| `cloudinit` | Seed ISOs with volume id `cidata` and exactly the given files, meta-data defaulting to the name, ISO `0600`, a read-only sata cdrom in the XML, an ISO at a path of its own; `enabled: false`: no cdrom, no ISO; a changed user-data rebuilds that ISO only and its secret never appears at `-vvv --diff`; then a rerun changes nothing; set absent, the staged files and default ISO removed, an ISO at its own path kept |
 | `nics` | Bridge, network and direct interfaces in list order, MAC lower-cased, model, driver name and queues, alias, tap name, trustGuestRxFilters (XPath) |
 | `hostdevs` | PCI by host address with a guest address and alias, unmanaged PCI, USB by vendor and product: each attribute exact (XPath) |
 | `graphics` | `none` (no graphics, no video), VNC on an address, SPICE on a fixed port with a password from a variable, the 1.0.0 `vnc_listen` still honoured; a changed password rewrites the file and appears nowhere at `-vvv --diff` |

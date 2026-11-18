@@ -94,3 +94,12 @@
   changed_when: true
   vars:
     __libvirt_vm_iso: "{{ __libvirt_vm_item.0.cloud_init.iso | default(libvirt_vm_cloud_init_dir ~ '/' ~ __libvirt_vm_item.0.name ~ '-seed.iso') }}"
+
+# A seed holds secrets: an absent VM's staged files and default-path ISO go with it (an own iso path stays yours)
+- name: Seeds of absent VMs are removed
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_cloud_init_dir }}/{{ __libvirt_vm_item[0] }}{{ __libvirt_vm_item[1] }}"
+    state: absent
+  loop: "{{ libvirt_vm_vms | map(attribute='name') | difference(__libvirt_vm_present) | product(['', '-seed.iso']) | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item

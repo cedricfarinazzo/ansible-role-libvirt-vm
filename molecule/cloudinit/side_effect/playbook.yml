@@ -64,3 +64,27 @@
       ansible.builtin.assert:
         that: molecule_run.stdout is search('changed=0 ')
         fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: Rerun with vm1 and vm2 absent
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: vm1 and vm2 absent
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': libvirt_vm_vms[:2] | map('combine', {'state': 'absent'}) | list + libvirt_vm_vms[2:]} | to_json }}"
+        molecule_expect: ok
+
+    - name: Read the seeds
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: molecule_gone
+      loop:
+        - /var/lib/libvirt_vm/cloud-init/vm1
+        - /var/lib/libvirt_vm/cloud-init/vm1-seed.iso
+        - /var/lib/libvirt_vm/cloud-init/vm2
+        - /srv/replicated/vm2-seed.iso
+
+    - name: Staged files and default ISOs removed, an ISO at its own path kept
+      ansible.builtin.assert:
+        that: molecule_gone.results | map(attribute='stat.exists') | list == [false, false, false, true]
+        fail_msg: "{{ molecule_gone.results | map(attribute='stat.exists') | list | to_json }}"
