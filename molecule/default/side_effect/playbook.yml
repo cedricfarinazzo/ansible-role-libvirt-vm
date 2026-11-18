@@ -1,0 +1,99 @@
+---
+# Reruns from the control node: no change, check mode, a changed VM rewritten, a VM set absent removed and the
+# others kept, then the absent rerun changes nothing; still no domain defined.
+- name: Reruns
+  hosts: vmhosts
+  gather_facts: false
+  vars:
+    molecule_vms_changed: >-
+      {{ libvirt_vm_vms[:1] | map('combine', {'memory_mib': 4096}) | list
+         + [libvirt_vm_vms[1] | combine({'state': 'absent'})] + libvirt_vm_vms[2:] }}
+  tasks:
+    - name: Rerun with no change
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: no change
+        molecule_args: []
+        molecule_expect: ok
+
+    - name: Nothing changed
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=0 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: Check mode on the converged host
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: check mode
+        molecule_args:
+          - --check
+        molecule_expect: ok
+
+    - name: Check mode changes nothing
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=0 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: More memory for web, db absent
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: web 4096 MiB, db absent
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': molecule_vms_changed} | to_json }}"
+        molecule_expect: ok
+
+    - name: Two changes, web rewritten and db removed
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=2 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: Read the files
+      ansible.builtin.stat:
+        path: /etc/libvirt_vm/{{ item }}.xml
+      register: molecule_stat
+      loop:
+        - web
+        - db.example
+        - tiny
+
+    - name: Db removed, web and tiny kept
+      ansible.builtin.assert:
+        that: molecule_stat.results | map(attribute='stat.exists') | list == [true, false, true]
+
+    - name: Web has its new memory
+      ansible.builtin.command: grep -c "<memory unit='MiB'>4096</memory>" /etc/libvirt_vm/web.xml
+      changed_when: false
+
+    - name: The absent rerun
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: db absent again
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': molecule_vms_changed} | to_json }}"
+        molecule_expect: ok
+
+    - name: The absent rerun changes nothing
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=0 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: No NVRAM directory without an EFI VM
+      ansible.builtin.stat:
+        path: /var/lib/libvirt_vm/nvram
+      register: molecule_nvram
+
+    - name: The NVRAM directory is absent
+      ansible.builtin.assert:
+        that: not molecule_nvram.stat.exists
+
+    - name: List every domain libvirt knows
+      ansible.builtin.command: virsh -c qemu:///system list --all --name
+      register: molecule_domains
+      changed_when: false
+
+    - name: Still no domain defined
+      ansible.builtin.assert:
+        that: molecule_domains.stdout | trim == ''
+        fail_msg: "{{ molecule_domains.stdout_lines }}"

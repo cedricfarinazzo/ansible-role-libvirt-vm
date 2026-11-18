@@ -1,0 +1,56 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# One host with OVMF: an EFI VM next to a BIOS one
+platforms:
+  - name: libvirt-vm-uefi-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        molecule_packages:
+          - ovmf
+        libvirt_vm_vms:
+          - name: efi-vm
+            firmware: efi
+            disks:
+              - dev: /dev/vg0/efi
+                target: vda
+            interfaces:
+              - bridge: br0
+                mac: "02:00:00:00:01:01"
+          - name: bios-vm
+verifier:
+  name: ansible
+scenario:
+  name: uefi
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - destroy

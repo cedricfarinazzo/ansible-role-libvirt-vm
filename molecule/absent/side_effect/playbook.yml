@@ -1,0 +1,60 @@
+---
+# One VM absent by its own state, then every VM absent through libvirt_vm_defaults; each rerun changes nothing.
+- name: Removal
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Two set absent by its own state
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: two absent
+        molecule_args:
+          - -e
+          - '{"libvirt_vm_vms": [{"name": "one"}, {"name": "two", "firmware": "efi", "state": "absent"}, {"name": "three"}]}'
+        molecule_expect: ok
+
+    - name: One change
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=1 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: Read the files
+      ansible.builtin.stat:
+        path: /etc/libvirt_vm/{{ item }}.xml
+      register: molecule_stat
+      loop:
+        - one
+        - two
+        - three
+
+    - name: Two removed, the others kept
+      ansible.builtin.assert:
+        that: molecule_stat.results | map(attribute='stat.exists') | list == [true, false, true]
+
+    - name: Every VM absent through the defaults
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: all absent
+        molecule_args:
+          - -e
+          - '{"libvirt_vm_defaults": {"state": "absent"}}'
+        molecule_expect: ok
+
+    - name: Changed, one and three removed
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=1 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: Every VM absent again
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: all absent again
+        molecule_args:
+          - -e
+          - '{"libvirt_vm_defaults": {"state": "absent"}}'
+        molecule_expect: ok
+
+    - name: The rerun changes nothing
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=0 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"

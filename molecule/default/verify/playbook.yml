@@ -1,0 +1,109 @@
+---
+# Each file rendered root 0600 in a root 0700 directory, valid for libvirt, with what its VM asked for; no domain
+# defined: the role never runs virsh define or start.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Read the XML directory and files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: molecule_stat
+      loop:
+        - /etc/libvirt_vm
+        - /etc/libvirt_vm/web.xml
+        - /etc/libvirt_vm/db.example.xml
+        - /etc/libvirt_vm/tiny.xml
+
+    - name: Directory root 0700, files root 0600
+      ansible.builtin.assert:
+        that:
+          - molecule_stat.results[0].stat.isdir
+          - molecule_stat.results[0].stat.mode == '0700'
+          - molecule_stat.results[1:] | map(attribute='stat.exists') | list == [true, true, true]
+          - molecule_stat.results[1:] | map(attribute='stat.mode') | unique | list == ['0600']
+          - molecule_stat.results | map(attribute='stat.pw_name') | unique | list == ['root']
+
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - web
+        - db.example
+        - tiny
+
+    - name: Read the files
+      ansible.builtin.slurp:
+        path: /etc/libvirt_vm/{{ item }}.xml
+      register: molecule_xml
+      loop:
+        - web
+        - db.example
+        - tiny
+
+    - name: Web has its block disk, bridge and MAC, BIOS, VNC on 127.0.0.1, serial and guest agent
+      ansible.builtin.assert:
+        that:
+          - "\"<domain type='kvm'>\" in molecule_web"
+          - "\"<memory unit='MiB'>2048</memory>\" in molecule_web"
+          - "\"<vcpu placement='static'>2</vcpu>\" in molecule_web"
+          - "\"machine='q35'\" in molecule_web"
+          - "\"<disk type='block' device='disk'>\" in molecule_web"
+          - "\"<source dev='/dev/vg0/web'/>\" in molecule_web"
+          - "\"<driver name='qemu' type='raw' cache='none' discard='unmap'/>\" in molecule_web"
+          - "\"<target dev='vda' bus='virtio'/>\" in molecule_web"
+          - "\"<source bridge='br0'/>\" in molecule_web"
+          - "\"<mac address='02:00:00:00:00:01'/>\" in molecule_web"
+          - "\"<model type='virtio'/>\" in molecule_web"
+          - "\"<cpu mode='host-passthrough'/>\" in molecule_web"
+          - "'<loader' not in molecule_web"
+          - "\"<listen type='address' address='127.0.0.1'/>\" in molecule_web"
+          - "\"<serial type='pty'>\" in molecule_web"
+          - "\"name='org.qemu.guest_agent.0'\" in molecule_web"
+        fail_msg: "{{ molecule_web }}"
+      vars:
+        molecule_web: "{{ molecule_xml.results[0].content | b64decode }}"
+
+    - name: Db has every other option, no VNC, serial or guest agent
+      ansible.builtin.assert:
+        that:
+          - "\"<domain type='qemu'>\" in molecule_db"
+          - "\"machine='pc'\" in molecule_db"
+          - "\"<cpu mode='host-model'/>\" in molecule_db"
+          - "\"<disk type='file' device='disk'>\" in molecule_db"
+          - "\"<source file='/srv/images/db.qcow2'/>\" in molecule_db"
+          - "\"<driver name='qemu' type='qcow2' cache='writeback' discard='ignore'/>\" in molecule_db"
+          - "\"<target dev='sda' bus='scsi'/>\" in molecule_db"
+          - "\"<target dev='sdb' bus='sata'/>\" in molecule_db"
+          - "\"<mac address='52:54:00:ab:cd:ef'/>\" in molecule_db"
+          - "\"<model type='e1000e'/>\" in molecule_db"
+          - "\"<source bridge='br-lan.20'/>\" in molecule_db"
+          - "\"<source bridge='br1'/>\" in molecule_db"
+          - "'<graphics' not in molecule_db"
+          - "'<serial' not in molecule_db"
+          - "'guest_agent' not in molecule_db"
+        fail_msg: "{{ molecule_db }}"
+      vars:
+        molecule_db: "{{ molecule_xml.results[1].content | b64decode }}"
+
+    - name: Tiny has the defaults, no cpu element, VNC on ::1
+      ansible.builtin.assert:
+        that:
+          - "\"<memory unit='MiB'>1024</memory>\" in molecule_tiny"
+          - "'<cpu' not in molecule_tiny"
+          - "'<disk' not in molecule_tiny"
+          - "'<interface' not in molecule_tiny"
+          - "\"<listen type='address' address='::1'/>\" in molecule_tiny"
+        fail_msg: "{{ molecule_tiny }}"
+      vars:
+        molecule_tiny: "{{ molecule_xml.results[2].content | b64decode }}"
+
+    - name: List every domain libvirt knows
+      ansible.builtin.command: virsh -c qemu:///system list --all --name
+      register: molecule_domains
+      changed_when: false
+
+    - name: No domain is defined
+      ansible.builtin.assert:
+        that: molecule_domains.stdout | trim == ''
+        fail_msg: "{{ molecule_domains.stdout_lines }}"

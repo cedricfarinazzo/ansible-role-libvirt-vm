@@ -1,0 +1,21 @@
+---
+# Each VM: name (required), state, memory_mib, vcpus, type, machine, cpu_mode, firmware, disks, interfaces,
+# vnc, vnc_listen, serial, guest_agent; a missing key takes its value from libvirt_vm_defaults.
+libvirt_vm_vms: []
+
+# Per-VM defaults, merged over the role's own (vars/main.yml, listed in README.md): a VM's own key wins
+libvirt_vm_defaults: {}
+
+# Where the XML files go, <name>.xml: never under /etc/libvirt or /var/lib/libvirt, where an undefine
+# deletes files (Pacemaker's VirtualDomain undefines before every start)
+libvirt_vm_xml_dir: /etc/libvirt_vm
+
+# EFI firmware: OVMF of Debian 13 and Ubuntu (package ovmf); NVRAM copied from the template at first start
+libvirt_vm_ovmf_code: /usr/share/OVMF/OVMF_CODE_4M.fd
+libvirt_vm_ovmf_vars: /usr/share/OVMF/OVMF_VARS_4M.fd
+libvirt_vm_nvram_dir: /var/lib/libvirt_vm/nvram
+
+# virt-xml-validate checks each file before it is written
+libvirt_vm_validate: true
+libvirt_vm_packages:
+  - libvirt-clients

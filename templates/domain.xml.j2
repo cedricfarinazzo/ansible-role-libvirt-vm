@@ -1,0 +1,67 @@
+<!-- {{ ansible_managed }}: rendered by the libvirt_vm role, never defined by it -->
+<domain type='{{ __libvirt_vm_vm.type }}'>
+{# VirtualDomain reads the name with grep: <name> must stay alone on its line #}
+  <name>{{ __libvirt_vm_vm.name }}</name>
+  <memory unit='MiB'>{{ __libvirt_vm_vm.memory_mib }}</memory>
+  <currentMemory unit='MiB'>{{ __libvirt_vm_vm.memory_mib }}</currentMemory>
+  <vcpu placement='static'>{{ __libvirt_vm_vm.vcpus }}</vcpu>
+  <os>
+    <type arch='x86_64' machine='{{ __libvirt_vm_vm.machine }}'>hvm</type>
+{% if __libvirt_vm_vm.firmware == 'efi' %}
+    <loader readonly='yes' type='pflash'>{{ libvirt_vm_ovmf_code }}</loader>
+    <nvram template='{{ libvirt_vm_ovmf_vars }}'>{{ libvirt_vm_nvram_dir }}/{{ __libvirt_vm_vm.name }}_VARS.fd</nvram>
+{% endif %}
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+{% if __libvirt_vm_vm.cpu_mode != 'none' %}
+  <cpu mode='{{ __libvirt_vm_vm.cpu_mode }}'/>
+{% endif %}
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+{% for disk in __libvirt_vm_vm.disks %}
+{%   set d = __libvirt_vm_disk_defaults | combine(disk) %}
+    <disk type='{{ 'block' if d.dev is defined else 'file' }}' device='disk'>
+      <driver name='qemu' type='{{ d.format }}' cache='{{ d.cache }}' discard='{{ d.discard }}'/>
+      <source {{ 'dev' if d.dev is defined else 'file' }}='{{ d.dev | default(d.file) }}'/>
+      <target dev='{{ d.target }}' bus='{{ d.bus }}'/>
+    </disk>
+{% endfor %}
+{% for nic in __libvirt_vm_vm.interfaces %}
+{%   set n = __libvirt_vm_interface_defaults | combine(nic) %}
+    <interface type='bridge'>
+      <mac address='{{ n.mac | lower }}'/>
+      <source bridge='{{ n.bridge }}'/>
+      <model type='{{ n.model }}'/>
+    </interface>
+{% endfor %}
+{% if __libvirt_vm_vm.serial %}
+    <serial type='pty'>
+      <target port='0'/>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+{% endif %}
+{% if __libvirt_vm_vm.guest_agent %}
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+{% endif %}
+{% if __libvirt_vm_vm.vnc %}
+    <graphics type='vnc' port='-1' autoport='yes' listen='{{ __libvirt_vm_vm.vnc_listen }}'>
+      <listen type='address' address='{{ __libvirt_vm_vm.vnc_listen }}'/>
+    </graphics>
+    <video>
+      <model type='virtio'/>
+    </video>
+{% endif %}
+    <memballoon model='virtio'/>
+  </devices>
+</domain>

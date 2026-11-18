@@ -1,0 +1,55 @@
+---
+- name: Shared preparation
+  ansible.builtin.import_playbook: ../../shared/prepare.yml
+
+# One node, no fencing: enough for Pacemaker to run a resource; the cluster itself is out of the role's scope
+- name: A single-node Pacemaker cluster and an empty disk image
+  hosts: vmhosts
+  tasks:
+    - name: Corosync has a one-node configuration
+      ansible.builtin.copy:
+        dest: /etc/corosync/corosync.conf
+        mode: "0644"
+        content: |
+          totem {
+            version: 2
+            cluster_name: molecule
+            transport: knet
+            crypto_cipher: none
+            crypto_hash: none
+          }
+          nodelist {
+            node {
+              name: vmhost
+              nodeid: 1
+              ring0_addr: 127.0.0.1
+            }
+          }
+          quorum {
+            provider: corosync_votequorum
+          }
+
+    - name: Corosync and Pacemaker run on it
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - corosync
+        - pacemaker
+
+    - name: Pacemaker has a DC
+      ansible.builtin.command: crm_mon -1
+      register: molecule_mon
+      changed_when: false
+      until: molecule_mon.stdout is search('Current DC. vmhost')
+      retries: 30
+      delay: 2
+
+    - name: Fencing is off (one test node)
+      ansible.builtin.command: crm_attribute -n stonith-enabled -v false
+      changed_when: true
+
+    - name: The VM's disk image exists
+      ansible.builtin.command: qemu-img create -f qcow2 /srv/vd-test.qcow2 16M
+      args:
+        creates: /srv/vd-test.qcow2

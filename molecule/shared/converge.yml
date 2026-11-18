@@ -1,0 +1,5 @@
+---
+- name: Converge
+  hosts: vmhosts
+  roles:
+    - role: ../../../ansible-role-libvirt-vm

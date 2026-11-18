@@ -1,0 +1,22 @@
+---
+# Only converge's file is there, and nothing was written under /var/lib/libvirt.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Find the XML files
+      ansible.builtin.find:
+        paths: /etc/libvirt_vm
+      register: molecule_files
+
+    - name: Read the refused directory
+      ansible.builtin.stat:
+        path: /var/lib/libvirt/vms
+      register: molecule_moved
+
+    - name: Only good.xml, no refused directory
+      ansible.builtin.assert:
+        that:
+          - molecule_files.files | map(attribute='path') | list == ['/etc/libvirt_vm/good.xml']
+          - not molecule_moved.stat.exists
+        fail_msg: "{{ molecule_files.files | map(attribute='path') | list }}"
