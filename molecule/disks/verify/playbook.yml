@@ -1,0 +1,84 @@
+---
+# Each disk renders its device, driver, source, target and read-only flag in list order; new files exist with their format and size.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - vm1
+
+    - name: Vm1's disks, in order
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm1.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/disk)"
+            value: "4"
+          - xpath: "string(/domain/devices/disk[1]/@type)"
+            value: "file"
+          - xpath: "string(/domain/devices/disk[1]/source/@file)"
+            value: "/srv/vm1/root.qcow2"
+          - xpath: "string(/domain/devices/disk[1]/driver/@type)"
+            value: "qcow2"
+          - xpath: "string(/domain/devices/disk[1]/driver/@cache)"
+            value: "writethrough"
+          - xpath: "string(/domain/devices/disk[1]/driver/@io)"
+            value: "native"
+          - xpath: "string(/domain/devices/disk[1]/driver/@discard)"
+            value: "unmap"
+          - xpath: "string(/domain/devices/disk[1]/target/@dev)"
+            value: "vda"
+          - xpath: "count(/domain/devices/disk[1]/readonly)"
+            value: "0"
+          - xpath: "string(/domain/devices/disk[2]/@type)"
+            value: "block"
+          - xpath: "string(/domain/devices/disk[2]/source/@dev)"
+            value: "/dev/vg0/vm1-data"
+          - xpath: "string(/domain/devices/disk[2]/driver/@io)"
+            value: "io_uring"
+          - xpath: "string(/domain/devices/disk[2]/driver/@discard)"
+            value: "ignore"
+          - xpath: "string(/domain/devices/disk[2]/target/@dev)"
+            value: "vdb"
+          - xpath: "string(/domain/devices/disk[3]/target/@bus)"
+            value: "scsi"
+          - xpath: "string(/domain/devices/disk[3]/driver/@cache)"
+            value: "directsync"
+          - xpath: "string(/domain/devices/disk[3]/driver/@io)"
+            value: "threads"
+          - xpath: "count(/domain/devices/disk[3]/readonly)"
+            value: "1"
+          - xpath: "string(/domain/devices/disk[4]/@device)"
+            value: "cdrom"
+          - xpath: "string(/domain/devices/disk[4]/source/@file)"
+            value: "/srv/iso/installer.iso"
+          - xpath: "string(/domain/devices/disk[4]/target/@dev)"
+            value: "sdb"
+          - xpath: "string(/domain/devices/disk[4]/target/@bus)"
+            value: "sata"
+          - xpath: "count(/domain/devices/disk[4]/readonly)"
+            value: "1"
+          - xpath: "count(/domain/devices/disk[4]/driver/@discard)"
+            value: "0"
+
+    - name: Read the new disks
+      ansible.builtin.command: qemu-img info --output=json {{ item }}
+      register: molecule_info
+      changed_when: false
+      loop:
+        - /srv/vm1/root.qcow2
+        - /srv/vm1/shared.raw
+
+    - name: Each new disk has its format and size
+      ansible.builtin.assert:
+        that:
+          - (molecule_info.results[0].stdout | from_json).format == 'qcow2'
+          - (molecule_info.results[0].stdout | from_json)['virtual-size'] == 2147483648
+          - (molecule_info.results[1].stdout | from_json).format == 'raw'
+          - (molecule_info.results[1].stdout | from_json)['virtual-size'] == 67108864
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

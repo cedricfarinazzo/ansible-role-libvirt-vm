@@ -1,0 +1,36 @@
+---
+# Each file equals, byte for byte, the one tag 1.0.0 rendered from the same inputs.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - web
+        - db.example
+        - tiny
+        - uefi
+    - name: Read the files
+      ansible.builtin.slurp:
+        path: /etc/libvirt_vm/{{ item }}.xml
+      register: molecule_xml
+      loop: "{{ molecule_names }}"
+      vars:
+        molecule_names: &names
+          - web
+          - db.example
+          - tiny
+          - uefi
+
+    - name: Each file is the 1.0.0 one
+      ansible.builtin.assert:
+        that: item.content | b64decode == lookup('ansible.builtin.file', 'files/' ~ item.item ~ '.xml', rstrip=false)
+        fail_msg: "{{ item.item }}: {{ item.content | b64decode }}"
+      loop: "{{ molecule_xml.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

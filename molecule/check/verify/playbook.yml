@@ -11,10 +11,22 @@
       loop:
         - /etc/libvirt_vm
         - /var/lib/libvirt_vm
+        - /srv/vms
+        - /var/cache/libvirt_vm
 
-    - name: No directory created
+    - name: No directory, disk or seed ISO created
       ansible.builtin.assert:
-        that: molecule_stat.results | map(attribute='stat.exists') | list == [false, false]
+        that: molecule_stat.results | map(attribute='stat.exists') | list == [false, false, false, false]
+
+    - name: Read the ISO builder's package state
+      ansible.builtin.command: dpkg-query -W -f=${Status} xorriso
+      register: molecule_xorriso
+      changed_when: false
+      failed_when: false
+
+    - name: Xorriso not installed
+      ansible.builtin.assert:
+        that: molecule_xorriso.stdout is not search('install ok installed')
 
     - name: Read the package state
       ansible.builtin.command: dpkg-query -W -f=${Status} libvirt-clients

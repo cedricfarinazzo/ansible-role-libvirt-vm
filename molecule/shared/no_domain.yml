@@ -1,0 +1,11 @@
+---
+# Tasks: libvirt lists no domain; the role never defines one while libvirt_vm_pacemaker is true.
+- name: Read the defined domains
+  ansible.builtin.command: virsh -c qemu:///system list --all --name
+  register: molecule_domains
+  changed_when: false
+
+- name: No domain is defined
+  ansible.builtin.assert:
+    that: molecule_domains.stdout | trim == ''
+    fail_msg: "{{ molecule_domains.stdout_lines }}"

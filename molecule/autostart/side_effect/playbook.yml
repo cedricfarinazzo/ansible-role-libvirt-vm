@@ -1,0 +1,37 @@
+---
+# Autostart turned off, then the VMs absent: stopped and undefined, their files gone.
+- name: Autostart changed, then VMs absent
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Rerun with auto's autostart off
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: autostart off
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': [libvirt_vm_vms[0] | combine({'autostart': false})] + libvirt_vm_vms[1:]} | to_json }}"
+        molecule_expect: ok
+
+    - name: Read auto
+      ansible.builtin.command: virsh -c qemu:///system dominfo auto
+      register: molecule_auto
+      changed_when: false
+
+    - name: Autostart off, still running
+      ansible.builtin.assert:
+        that:
+          - molecule_auto.stdout is search('Autostart:\\s+disable')
+          - molecule_auto.stdout is search('State:\\s+running')
+
+    - name: Rerun with every VM absent
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: all absent
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': libvirt_vm_vms | map('combine', {'state': 'absent'}) | list} | to_json }}"
+        molecule_expect: ok
+
+    - name: No domain left
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

@@ -1,0 +1,91 @@
+---
+# libvirt_vm_pacemaker false: libvirt alone runs these VMs. virsh, not community.libvirt: no collection to install.
+- name: Read the defined domains
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - -c
+      - "{{ libvirt_vm_uri }}"
+      - list
+      - --all
+      - --name
+  register: __libvirt_vm_defined
+  changed_when: false
+  check_mode: false
+
+# A rendered file that changed is defined again; libvirt applies it at the next cold start
+- name: Domains are defined from their files
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - -c
+      - "{{ libvirt_vm_uri }}"
+      - define
+      - "{{ libvirt_vm_xml_dir }}/{{ __libvirt_vm_item.__libvirt_vm_item.name }}.xml"
+  loop: "{{ __libvirt_vm_rendered.results | default([]) }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.__libvirt_vm_item.name }}"
+  when:
+    - __libvirt_vm_vm.define
+    - __libvirt_vm_item is changed or __libvirt_vm_vm.name not in __libvirt_vm_defined.stdout_lines
+  changed_when: true
+  vars:
+    __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item.__libvirt_vm_item) }}"
+
+- name: Read each defined domain's autostart and state
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - -c
+      - "{{ libvirt_vm_uri }}"
+      - dominfo
+      - "{{ __libvirt_vm_item.name }}"
+  register: __libvirt_vm_info
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  loop: "{{ __libvirt_vm_define_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+
+- name: Autostart is set as asked
+  ansible.builtin.command:
+    argv: "{{ ['virsh', '-c', libvirt_vm_uri, 'autostart'] + ([] if __libvirt_vm_item.0.autostart else ['--disable']) + [__libvirt_vm_item.0.name] }}"
+  loop: "{{ __libvirt_vm_define_vms | zip(__libvirt_vm_info.results) | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.0.name }}"
+  when: >-
+    __libvirt_vm_item.1.rc != 0
+    or (__libvirt_vm_item.1.stdout is search('Autostart:\s+enable')) != __libvirt_vm_item.0.autostart
+  changed_when: true
+
+- name: Domains asked to start are running
+  ansible.builtin.command:
+    argv:
+      - virsh
+      - -c
+      - "{{ libvirt_vm_uri }}"
+      - start
+      - "{{ __libvirt_vm_item.0.name }}"
+  loop: "{{ __libvirt_vm_define_vms | zip(__libvirt_vm_info.results) | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.0.name }}"
+  when:
+    - __libvirt_vm_item.0.start
+    - __libvirt_vm_item.1.stdout is not search('State:\s+running')
+  changed_when: true
+
+# --keep-nvram: the NVRAM file is the VM's state, as when the role only renders
+- name: Absent VMs are stopped and undefined
+  ansible.builtin.shell:
+    cmd: >-
+      virsh -c {{ libvirt_vm_uri | quote }} destroy {{ __libvirt_vm_item | quote }} 2>/dev/null;
+      virsh -c {{ libvirt_vm_uri | quote }} undefine --keep-nvram {{ __libvirt_vm_item | quote }}
+  loop: "{{ libvirt_vm_vms | map(attribute='name') | difference(__libvirt_vm_present) | intersect(__libvirt_vm_defined.stdout_lines) }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+  changed_when: true

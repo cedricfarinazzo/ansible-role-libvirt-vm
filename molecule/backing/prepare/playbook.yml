@@ -1,0 +1,43 @@
+---
+- name: Shared prepare
+  ansible.builtin.import_playbook: ../../shared/prepare.yml
+
+# A 1 MiB image of zeros, its sha256 known, served on 127.0.0.1:8080; each request logged
+- name: An image and its HTTP server
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: The image directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /srv/images
+        - /srv/www
+
+    - name: The image of zeros
+      ansible.builtin.command: truncate -s 1M /srv/images/base.raw
+      args:
+        creates: /srv/images/base.raw
+
+    - name: The same image served
+      ansible.builtin.copy:
+        src: /srv/images/base.raw
+        dest: /srv/www/base.raw
+        remote_src: true
+        mode: "0644"
+
+    - name: The HTTP server runs
+      ansible.builtin.shell: >-
+        cd /srv/www && nohup python3 -m http.server 8080 --bind 127.0.0.1 > /var/log/molecule-http.log 2>&1 &
+      changed_when: true
+
+    - name: The HTTP server answers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/base.raw
+        method: HEAD
+      register: molecule_http
+      retries: 10
+      delay: 1
+      until: molecule_http is succeeded

@@ -11,3 +11,5 @@ exclude_paths:
 # Task files the scenarios include, not playbooks
 kinds:
   - tasks: "molecule/shared/recap.yml"
+  - tasks: "molecule/shared/xpath.yml"
+  - tasks: "molecule/shared/no_domain.yml"

@@ -12,6 +12,6 @@
 
     - name: Libvirt's daemon and the scenario's extra packages are installed
       ansible.builtin.apt:
-        name: "{{ ['libvirt-daemon-system', 'iproute2', 'procps'] + molecule_packages | default([]) }}"
+        name: "{{ ['libvirt-daemon-system', 'libxml2-utils', 'iproute2', 'procps'] + molecule_packages | default([]) }}"
         update_cache: true
         cache_valid_time: 3600

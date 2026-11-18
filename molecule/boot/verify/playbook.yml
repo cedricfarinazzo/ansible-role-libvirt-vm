@@ -1,0 +1,76 @@
+---
+# Boot devices in list order (a reordered template fails here), and the other VM-level options.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - vm1
+        - vm2
+
+    - name: Vm1 boots network, cdrom, hd
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm1.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/os/boot)"
+            value: "3"
+          - xpath: "string(/domain/os/boot[1]/@dev)"
+            value: "network"
+          - xpath: "string(/domain/os/boot[2]/@dev)"
+            value: "cdrom"
+          - xpath: "string(/domain/os/boot[3]/@dev)"
+            value: "hd"
+          - xpath: "string(/domain/os/bootmenu/@enable)"
+            value: "yes"
+          - xpath: "string(/domain/os/bios/@useserial)"
+            value: "yes"
+          - xpath: "string(/domain/uuid)"
+            value: "4c4c4544-0000-1000-8000-0000000000aa"
+          - xpath: "string(/domain/clock/@offset)"
+            value: "localtime"
+          - xpath: "string(/domain/devices/emulator)"
+            value: "/usr/bin/qemu-system-x86_64"
+          - xpath: "string(/domain/devices/rng/backend)"
+            value: "/dev/urandom"
+          - xpath: "string(/domain/devices/serial/@type)"
+            value: "file"
+          - xpath: "string(/domain/devices/serial/source/@path)"
+            value: "/var/log/libvirt_vm/vm1-console.log"
+          - xpath: "string(/domain/devices/console/source/@append)"
+            value: "on"
+
+    - name: Vm2 boots cdrom, hd
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm2.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/os/boot)"
+            value: "2"
+          - xpath: "string(/domain/os/boot[1]/@dev)"
+            value: "cdrom"
+          - xpath: "string(/domain/os/boot[2]/@dev)"
+            value: "hd"
+          - xpath: "count(/domain/os/bootmenu)"
+            value: "0"
+          - xpath: "string-length(/domain/uuid)"
+            value: "36"
+          - xpath: "string(/domain/devices/serial/@type)"
+            value: "pty"
+
+    - name: Read the console log directory
+      ansible.builtin.stat:
+        path: /var/log/libvirt_vm
+      register: molecule_logdir
+
+    - name: The console log directory is root 0750
+      ansible.builtin.assert:
+        that:
+          - molecule_logdir.stat.isdir
+          - molecule_logdir.stat.mode == '0750'
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

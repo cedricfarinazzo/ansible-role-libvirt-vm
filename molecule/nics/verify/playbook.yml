@@ -1,0 +1,64 @@
+---
+# Each interface renders its type, source, MAC (lower case), model, driver, alias and name, in list order.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - vm1
+
+    - name: Vm1's interfaces, in order
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm1.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/interface)"
+            value: "4"
+          - xpath: "string(/domain/devices/interface[1]/@type)"
+            value: "bridge"
+          - xpath: "string(/domain/devices/interface[1]/source/@bridge)"
+            value: "br0"
+          - xpath: "string(/domain/devices/interface[1]/mac/@address)"
+            value: "02:00:00:00:10:01"
+          - xpath: "string(/domain/devices/interface[1]/model/@type)"
+            value: "virtio"
+          - xpath: "count(/domain/devices/interface[1]/driver)"
+            value: "0"
+          - xpath: "string(/domain/devices/interface[2]/@type)"
+            value: "network"
+          - xpath: "string(/domain/devices/interface[2]/source/@network)"
+            value: "default"
+          - xpath: "string(/domain/devices/interface[2]/mac/@address)"
+            value: "52:54:00:aa:bb:01"
+          - xpath: "string(/domain/devices/interface[2]/model/@type)"
+            value: "e1000e"
+          - xpath: "string(/domain/devices/interface[2]/alias/@name)"
+            value: "ua-lan1"
+          - xpath: "string(/domain/devices/interface[3]/@type)"
+            value: "direct"
+          - xpath: "string(/domain/devices/interface[3]/@trustGuestRxFilters)"
+            value: "yes"
+          - xpath: "string(/domain/devices/interface[3]/source/@dev)"
+            value: "eth0"
+          - xpath: "string(/domain/devices/interface[3]/source/@mode)"
+            value: "bridge"
+          - xpath: "string(/domain/devices/interface[3]/driver/@name)"
+            value: "vhost"
+          - xpath: "string(/domain/devices/interface[3]/driver/@queues)"
+            value: "4"
+          - xpath: "string(/domain/devices/interface[3]/target/@dev)"
+            value: "tap-vm1"
+          - xpath: "string(/domain/devices/interface[4]/source/@bridge)"
+            value: "br1"
+          - xpath: "string(/domain/devices/interface[4]/model/@type)"
+            value: "rtl8139"
+          - xpath: "string(/domain/devices/interface[4]/driver/@name)"
+            value: "qemu"
+          - xpath: "count(/domain/devices/interface[4]/driver/@queues)"
+            value: "0"
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

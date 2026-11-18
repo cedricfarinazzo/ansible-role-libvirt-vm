@@ -1,0 +1,58 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# Host devices: PCI by address with a guest address and alias, USB by vendor and product
+platforms:
+  - name: libvirt-vm-hostdevs-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        libvirt_vm_vms:
+          - name: vm1
+            hostdevs:
+              - type: pci
+                source: "0000:3B:00.1"
+                destination: "0000:00:10.0"
+                alias: nic0
+              - type: usb
+                vendor: "0x1050"
+                product: "0x0407"
+                alias: key0
+              - type: pci
+                source: "0001:02:1f.7"
+                managed: false
+verifier:
+  name: ansible
+scenario:
+  name: hostdevs
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - destroy

@@ -1,0 +1,91 @@
+---
+# NoCloud seed: the files go in a staging directory, the ISO is rebuilt only when one of them changed.
+- name: The ISO builder is installed
+  ansible.builtin.package:
+    name: "{{ libvirt_vm_cloud_init_packages }}"
+    state: present
+  when:
+    - __libvirt_vm_cloud_init_vms | length > 0
+    - libvirt_vm_cloud_init_packages | length > 0
+
+- name: The seed directories exist, root only
+  ansible.builtin.file:
+    path: "{{ __libvirt_vm_item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop: >-
+    {{ ([libvirt_vm_cloud_init_dir] if __libvirt_vm_cloud_init_vms | length > 0 else [])
+       + __libvirt_vm_cloud_init_vms | map(attribute='name') | map('regex_replace', '^', libvirt_vm_cloud_init_dir ~ '/') | list }}
+  loop_control:
+    loop_var: __libvirt_vm_item
+
+# An ISO placed elsewhere (a replicated volume): its directory's existing mode is left alone
+- name: The directory of each ISO placed elsewhere exists  # noqa risky-file-permissions
+  ansible.builtin.file:
+    path: "{{ __libvirt_vm_item }}"
+    state: directory
+  loop: "{{ __libvirt_vm_cloud_init_vms | map(attribute='cloud_init') | selectattr('iso', 'defined') | map(attribute='iso') | map('dirname') | unique | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+
+# The content may hold secrets (passwords, keys): no_log, the diff included
+- name: Seed files are staged
+  ansible.builtin.copy:
+    content: "{{ __libvirt_vm_item.content }}"
+    dest: "{{ libvirt_vm_cloud_init_dir }}/{{ __libvirt_vm_item.vm }}/{{ __libvirt_vm_item.file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  register: __libvirt_vm_seed_files
+  no_log: true
+  loop: "{{ __libvirt_vm_seed_list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+  vars:
+    # meta-data defaults to the VM name as instance-id and hostname
+    __libvirt_vm_seed_list: >-
+      {% set out = [] %}{% for v in __libvirt_vm_cloud_init_vms %}{%
+      set files = {'meta-data': 'instance-id: ' ~ v.name ~ '\nlocal-hostname: ' ~ v.name ~ '\n'} | combine(v.cloud_init.files) %}{%
+      for f in files | dict2items %}{% set _ = out.append({'vm': v.name, 'file': f.key, 'content': f.value}) %}{% endfor %}{% endfor %}{{ out }}
+
+- name: Seed files no longer given are removed
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_cloud_init_dir }}/{{ __libvirt_vm_item[0].name }}/{{ __libvirt_vm_item[1] }}"
+    state: absent
+  register: __libvirt_vm_seed_gone
+  loop: "{{ __libvirt_vm_cloud_init_vms | product(['network-config', 'vendor-data']) | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item[0].name }} {{ __libvirt_vm_item[1] }}"
+  when: __libvirt_vm_item[1] not in __libvirt_vm_item[0].cloud_init.files
+
+- name: Read the seed ISOs
+  ansible.builtin.stat:
+    path: "{{ __libvirt_vm_item.cloud_init.iso | default(libvirt_vm_cloud_init_dir ~ '/' ~ __libvirt_vm_item.name ~ '-seed.iso') }}"
+    get_checksum: false
+  register: __libvirt_vm_isos
+  loop: "{{ __libvirt_vm_cloud_init_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+
+# Volume id cidata: what cloud-init's NoCloud source looks for. umask 077: the ISO holds the seed's secrets.
+- name: Seed ISOs are built
+  ansible.builtin.shell:
+    cmd: >-
+      rm -f {{ __libvirt_vm_iso | quote }} && umask 077 &&
+      xorrisofs -quiet -output {{ __libvirt_vm_iso | quote }} -volid cidata -joliet -rock
+      {{ (libvirt_vm_cloud_init_dir ~ '/' ~ __libvirt_vm_item.0.name) | quote }}
+  loop: "{{ __libvirt_vm_cloud_init_vms | zip(__libvirt_vm_isos.results) | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.0.name }}"
+  when: >-
+    not __libvirt_vm_item.1.stat.exists
+    or __libvirt_vm_seed_files.results | selectattr('changed') | selectattr('__libvirt_vm_item.vm', 'equalto', __libvirt_vm_item.0.name) | list | length > 0
+    or __libvirt_vm_seed_gone.results | selectattr('changed') | selectattr('__libvirt_vm_item.0.name', 'equalto', __libvirt_vm_item.0.name) | list | length > 0
+  changed_when: true
+  vars:
+    __libvirt_vm_iso: "{{ __libvirt_vm_item.0.cloud_init.iso | default(libvirt_vm_cloud_init_dir ~ '/' ~ __libvirt_vm_item.0.name ~ '-seed.iso') }}"

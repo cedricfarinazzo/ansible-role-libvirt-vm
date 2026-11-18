@@ -1,0 +1,69 @@
+---
+# Each VM renders its graphics type, listen, port and password; none renders no graphics or video.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - none
+        - vnc
+        - spice
+        - legacy
+
+    - name: None has no graphics
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/none.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/graphics)"
+            value: "0"
+          - xpath: "count(/domain/devices/video)"
+            value: "0"
+
+    - name: VNC on its address
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vnc.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/devices/graphics/@type)"
+            value: "vnc"
+          - xpath: "string(/domain/devices/graphics/@autoport)"
+            value: "yes"
+          - xpath: "string(/domain/devices/graphics/listen/@address)"
+            value: "192.0.2.10"
+          - xpath: "string(/domain/devices/video/model/@type)"
+            value: "vga"
+
+    - name: SPICE on its port with its password
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/spice.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/devices/graphics/@type)"
+            value: "spice"
+          - xpath: "string(/domain/devices/graphics/@port)"
+            value: "5901"
+          - xpath: "string(/domain/devices/graphics/@autoport)"
+            value: "no"
+          - xpath: "string(/domain/devices/graphics/@passwd)"
+            value: "molecule-pw-8d2e"
+          - xpath: "string(/domain/devices/graphics/listen/@address)"
+            value: "0.0.0.0"
+          - xpath: "string(/domain/devices/video/model/@type)"
+            value: "qxl"
+
+    - name: The 1.0.0 vnc keys still work
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/legacy.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/devices/graphics/@type)"
+            value: "vnc"
+          - xpath: "string(/domain/devices/graphics/listen/@address)"
+            value: "::1"
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

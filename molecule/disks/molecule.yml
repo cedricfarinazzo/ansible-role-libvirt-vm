@@ -1,0 +1,69 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# Disks: file, block, cdrom, read-only, cache, io, discard, several targets; new disks created by qemu-img
+platforms:
+  - name: libvirt-vm-disks-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        libvirt_vm_vms:
+          - name: vm1
+            disks:
+              - file: /srv/vm1/root.qcow2
+                format: qcow2
+                size: 2G
+                target: vda
+                cache: writethrough
+                io: native
+              - dev: /dev/vg0/vm1-data
+                target: vdb
+                io: io_uring
+                discard: ignore
+              - file: /srv/vm1/shared.raw
+                size: 64M
+                target: sda
+                bus: scsi
+                readonly: true
+                cache: directsync
+                io: threads
+              - file: /srv/iso/installer.iso
+                device: cdrom
+                target: sdb
+                bus: sata
+verifier:
+  name: ansible
+scenario:
+  name: disks
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - side_effect
+    - destroy

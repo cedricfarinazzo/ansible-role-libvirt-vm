@@ -1,0 +1,60 @@
+---
+# A local and a downloaded backing file under qcow2 overlays, a full copy grown to its size; one download in the cache.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - local
+        - remote
+        - copy
+    - name: Read the disks
+      ansible.builtin.command: qemu-img info --output=json {{ item }}
+      register: molecule_info
+      changed_when: false
+      loop:
+        - /srv/vms/local.qcow2
+        - /srv/vms/remote.qcow2
+        - /srv/vms/copy.raw
+
+    - name: Overlays on their backing file, the copy at its size
+      ansible.builtin.assert:
+        that:
+          - molecule_local['backing-filename'] == '/srv/images/base.raw'
+          - molecule_local['backing-filename-format'] == 'raw'
+          - molecule_remote['backing-filename'] == molecule_cached
+          - molecule_copy.format == 'raw'
+          - molecule_copy['backing-filename'] is not defined
+          - molecule_copy['virtual-size'] == 8388608
+        fail_msg: "{{ molecule_info.results | map(attribute='stdout') | list }}"
+      vars:
+        molecule_local: "{{ molecule_info.results[0].stdout | from_json }}"
+        molecule_remote: "{{ molecule_info.results[1].stdout | from_json }}"
+        molecule_copy: "{{ molecule_info.results[2].stdout | from_json }}"
+        molecule_cached: /var/cache/libvirt_vm/30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58-base.raw
+
+    - name: Read the HTTP log
+      ansible.builtin.command: grep -c 'GET /base.raw' /var/log/molecule-http.log
+      register: molecule_gets
+      changed_when: false
+
+    - name: The URL used by two disks was downloaded once
+      ansible.builtin.assert:
+        that: molecule_gets.stdout == '1'
+        fail_msg: "{{ molecule_gets.stdout }} downloads"
+
+    - name: The overlay is the VM's disk
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/remote.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/devices/disk[1]/source/@file)"
+            value: "/srv/vms/remote.qcow2"
+          - xpath: "string(/domain/devices/disk[1]/driver/@type)"
+            value: "qcow2"
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

@@ -12,7 +12,9 @@ show_usage() {
     echo "Scenarios: default (three VMs, every option: check mode, idempotence, a change, one absent, no domain defined),"
     echo "uefi (EFI and BIOS VMs, OVMF paths), options (no validation or package, other directories, shared defaults),"
     echo "absent (VMs removed one by one, then all), check (check mode on a fresh host writes nothing),"
-    echo "failure (bad inputs refused with their name, nothing written), virtualdomain (Pacemaker starts a rendered file)."
+    echo "failure (bad inputs refused with their name, nothing written), virtualdomain (Pacemaker starts a rendered file),"
+    echo "regression (1.0.0 inputs, 1.0.0 XML byte for byte), disks, backing (images from a path or URL), cloudinit (seed ISOs),"
+    echo "nics, hostdevs, graphics, boot (order kept, VM-level options), autostart (without Pacemaker: define, autostart, start)."
     echo "Several distributions, or 'all', run in parallel; each writes .molecule-logs/<distro>.log."
     echo
     echo "Supported: ${SUPPORTED// /, }"

@@ -35,6 +35,17 @@ provisioner:
             disks:
               - dev: /dev/vg0/web
                 target: vda
+          # A disk to create and a seed ISO to build: neither written in check mode
+          - name: app
+            disks:
+              - file: /srv/vms/app.qcow2
+                format: qcow2
+                size: 1G
+                target: vda
+            cloud_init:
+              enabled: true
+              files:
+                user-data: "#cloud-config\n"
 verifier:
   name: ansible
 scenario:

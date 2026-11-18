@@ -1,0 +1,96 @@
+---
+# A disk is created or filled only when its file is missing: an existing disk is the VM's data, never touched.
+- name: Disk tools are installed
+  ansible.builtin.package:
+    name: "{{ libvirt_vm_disk_packages }}"
+    state: present
+  when:
+    - __libvirt_vm_created | length > 0
+    - libvirt_vm_disk_packages | length > 0
+
+- name: The image cache exists, root only
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_image_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: __libvirt_vm_urls | length > 0
+
+# Downloaded once per URL, kept by its checksum: a later run with the same checksum downloads nothing
+- name: Remote images are downloaded and verified
+  ansible.builtin.get_url:
+    url: "{{ __libvirt_vm_item.key }}"
+    dest: "{{ libvirt_vm_image_cache_dir }}/{{ __libvirt_vm_item.value | regex_replace('^[a-z0-9]+:', '') }}-{{ __libvirt_vm_item.key | basename }}"
+    checksum: "{{ __libvirt_vm_item.value }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ __libvirt_vm_urls | dict2items }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.key }}"
+
+- name: Local images match their checksum
+  ansible.builtin.stat:
+    path: "{{ __libvirt_vm_item.backing_file | default(__libvirt_vm_item.image) }}"
+    checksum_algorithm: "{{ __libvirt_vm_item.checksum.split(':')[0] }}"
+  register: __libvirt_vm_local
+  failed_when: >-
+    not __libvirt_vm_local.stat.exists
+    or __libvirt_vm_local.stat.checksum != __libvirt_vm_item.checksum.split(':')[1]
+  loop: "{{ __libvirt_vm_created | selectattr('checksum', 'defined') | rejectattr('backing_file', 'match', '^https?://')
+            | rejectattr('image', 'match', '^https?://') | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.file }}"
+
+- name: The directory of each created disk exists
+  ansible.builtin.file:
+    path: "{{ __libvirt_vm_item }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ __libvirt_vm_created | map(attribute='file') | map('dirname') | unique | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+
+# qemu-img writes nothing in check mode: creates= only skips it, so the task is skipped there
+- name: Missing disks are created
+  ansible.builtin.command:
+    argv: "{{ __libvirt_vm_argv }}"
+    creates: "{{ __libvirt_vm_item.file }}"
+  loop: "{{ __libvirt_vm_created }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.file }}"
+  register: __libvirt_vm_new
+  when: not ansible_check_mode
+  vars:
+    __libvirt_vm_cached: >-
+      {{ (libvirt_vm_image_cache_dir ~ '/' ~ __libvirt_vm_item.checksum | default('') | regex_replace('^[a-z0-9]+:', '') ~ '-' ~ __libvirt_vm_src | basename)
+         if __libvirt_vm_src is match('^https?://') else __libvirt_vm_src }}
+    __libvirt_vm_src: "{{ __libvirt_vm_item.backing_file | default(__libvirt_vm_item.image | default('')) }}"
+    __libvirt_vm_argv: >-
+      {{ (['qemu-img', 'create', '-f', __libvirt_vm_item.format, '-b', __libvirt_vm_cached, '-F', __libvirt_vm_item.backing_format | default('qcow2'),
+           __libvirt_vm_item.file, __libvirt_vm_item.size]) if __libvirt_vm_item.backing_file is defined
+         else (['qemu-img', 'convert', '-O', __libvirt_vm_item.format, __libvirt_vm_cached, __libvirt_vm_item.file]) if __libvirt_vm_item.image is defined
+         else ['qemu-img', 'create', '-f', __libvirt_vm_item.format, __libvirt_vm_item.file, __libvirt_vm_item.size] }}
+
+# A full copy keeps the image's size: a size grows the new disk once, right after the copy
+- name: Copied images are grown to their size
+  ansible.builtin.command:
+    argv:
+      - qemu-img
+      - resize
+      - -f
+      - "{{ __libvirt_vm_item.__libvirt_vm_item.format }}"
+      - "{{ __libvirt_vm_item.__libvirt_vm_item.file }}"
+      - "{{ __libvirt_vm_item.__libvirt_vm_item.size }}"
+  loop: "{{ __libvirt_vm_new.results | default([]) | selectattr('changed') | list }}"
+  changed_when: true
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.__libvirt_vm_item.file }}"
+  when:
+    - __libvirt_vm_item.__libvirt_vm_item.image is defined
+    - __libvirt_vm_item.__libvirt_vm_item.size is defined

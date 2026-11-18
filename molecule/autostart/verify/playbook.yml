@@ -1,0 +1,39 @@
+---
+# Auto is defined, autostarted and running; manual defined, autostart off, shut off; rendered only rendered.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - auto
+        - manual
+        - rendered
+    - name: Read the domains
+      ansible.builtin.command: virsh -c qemu:///system dominfo {{ item }}
+      register: molecule_info
+      changed_when: false
+      loop:
+        - auto
+        - manual
+
+    - name: Autostart and state as asked
+      ansible.builtin.assert:
+        that:
+          - molecule_info.results[0].stdout is search('Autostart:\\s+enable')
+          - molecule_info.results[0].stdout is search('State:\\s+running')
+          - molecule_info.results[1].stdout is search('Autostart:\\s+disable')
+          - molecule_info.results[1].stdout is search('State:\\s+shut off')
+        fail_msg: "{{ molecule_info.results | map(attribute='stdout') | list }}"
+
+    - name: Read the domain list
+      ansible.builtin.command: virsh -c qemu:///system list --all --name
+      register: molecule_domains
+      changed_when: false
+
+    - name: Rendered is not defined
+      ansible.builtin.assert:
+        that: molecule_domains.stdout_lines | select | sort | list == ['auto', 'manual']
+        fail_msg: "{{ molecule_domains.stdout_lines }}"
