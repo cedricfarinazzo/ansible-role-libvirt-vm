@@ -135,6 +135,7 @@ good "a PCI hostdev, every key" "$(hd '"type": "pci", "source": "0000:3B:00.1", 
 good "a USB hostdev" "$(hd '"type": "usb", "vendor": "0x1050", "product": "0x0407"')"
 good "spice graphics, port, password" "$(gr '"type": "spice", "listen": "0.0.0.0", "port": 5901, "password": "s3cr#t"')"
 good "no graphics" "$(gr '"type": "none"')"
+good "graphics from the defaults" '{"libvirt_vm_defaults": {"graphics": {"type": "vnc", "password": "s3cr#t"}}, "libvirt_vm_vms": [{"name": "a"}]}'
 good "cloud-init, every file, own ISO" "$(ci '"enabled": true, "files": {"user-data": "#cloud-config\n", "meta-data": "instance-id: a\n", "network-config": "version: 2\n", "vendor-data": ""}, "iso": "/srv/seed/a.iso", "target": "sdy"')"
 good "cloud-init disabled, no files" "$(ci '"enabled": false')"
 bad "a bad UUID" "$(vm ', "uuid": "not-a-uuid"')"
@@ -235,6 +236,9 @@ bad "a password with a trailing newline" "$(gr '"password": "secret\n"')"
 bad "a password with an embedded newline" "$(gr '"password": "sec\nret"')"
 bad "a password too long" "$(gr '"password": "'"$(printf 'a%.0s' {1..65})"'"')"
 bad "an unknown graphics key" "$(gr '"keymap": "fr"')"
+bad "a graphics type from the defaults that is unknown" '{"libvirt_vm_defaults": {"graphics": {"type": "rdp"}}, "libvirt_vm_vms": [{"name": "a"}]}'
+bad "a graphics password from the defaults with a quote" '{"libvirt_vm_defaults": {"graphics": {"type": "vnc", "password": "a'"'"'b"}}, "libvirt_vm_vms": [{"name": "a"}]}'
+bad "a graphics password from the defaults with a trailing newline" '{"libvirt_vm_defaults": {"graphics": {"type": "vnc", "password": "pw\n"}}, "libvirt_vm_vms": [{"name": "a"}]}'
 bad "cloud-init as a boolean" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"cloud_init\": true}]}"
 bad "cloud-init with no enabled" "$(ci '"files": {"user-data": "x"}')"
 bad "cloud-init enabled as a string" "$(ci '"enabled": "yes", "files": {"user-data": "x"}')"

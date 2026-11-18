@@ -293,13 +293,15 @@
       {{ __libvirt_vm_graphics_types | join('|') }}, listen an IP address, port -1 or 5900-65535, password 1-64 characters without
       quote, angle bracket, ampersand, space or newline
     quiet: true
-  loop: "{{ libvirt_vm_vms | selectattr('graphics', 'defined') | rejectattr('graphics', 'none') | list }}"
+  loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.name }}"
   no_log: "{{ __libvirt_vm_secret }}"
+  # The merged value: a graphics set in libvirt_vm_defaults is checked as well
+  when: __libvirt_vm_g is not none
   vars:
-    __libvirt_vm_g: "{{ __libvirt_vm_item.graphics }}"
+    __libvirt_vm_g: "{{ (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item)).graphics }}"
 
 - name: Each hostdev is valid
   ansible.builtin.assert:
