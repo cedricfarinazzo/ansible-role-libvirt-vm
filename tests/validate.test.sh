@@ -37,6 +37,7 @@ good "one VM, defaults" "$(vm '')"
 good "every option" "$(vm ', "state": "present", "memory_mib": 4096, "vcpus": 4, "type": "qemu", "machine": "pc-q35-9.2", "cpu_mode": "maximum", "firmware": "efi", "vnc": false, "vnc_listen": "::1", "serial": false, "guest_agent": false')"
 good "a file disk, every disk option" '{"libvirt_vm_vms": [{"name": "db", "disks": [{"file": "/srv/images/db.qcow2", "format": "qcow2", "target": "sda", "bus": "scsi", "cache": "writeback", "discard": "ignore"}]}]}'
 good "an upper-case MAC, model e1000e" '{"libvirt_vm_vms": [{"name": "a", "interfaces": [{"bridge": "br-lan.20", "mac": "52:54:00:AB:CD:EF", "model": "e1000e"}]}]}'
+good "VNC on every address" "$(vm ', "vnc_listen": "0.0.0.0"')"
 good "absent" "$(vm ', "state": "absent"')"
 good "two VMs" '{"libvirt_vm_vms": [{"name": "a"}, {"name": "b", "cpu_mode": "none"}]}'
 good "defaults changed" '{"libvirt_vm_defaults": {"memory_mib": 2048, "firmware": "efi"}, "libvirt_vm_vms": [{"name": "a"}]}'
@@ -64,6 +65,7 @@ bad "an unknown CPU mode" "$(vm ', "cpu_mode": "custom"')"
 bad "an unknown firmware" "$(vm ', "firmware": "uefi"')"
 bad "vnc as a string" "$(vm ', "vnc": "yes"')"
 bad "a VNC listen that is no address" "$(vm ', "vnc_listen": "localhost"')"
+bad "a VNC listen with an octet above 255" "$(vm ', "vnc_listen": "999.1.1.1"')"
 bad "a VNC listen with a trailing newline" "$(vm ', "vnc_listen": "127.0.0.1\n"')"
 bad "serial as a string" "$(vm ', "serial": "no"')"
 bad "guest_agent as a number" "$(vm ', "guest_agent": 1')"
