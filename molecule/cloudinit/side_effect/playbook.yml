@@ -1,0 +1,90 @@
+---
+# A changed user-data rebuilds that ISO only; its secret never reaches the output, even at -vvv with --diff.
+- name: Seed change and secrecy
+  hosts: vmhosts
+  gather_facts: false
+  vars:
+    molecule_secret: molecule-sentinel-4f1c9a
+  tasks:
+    - name: Read the ISOs before
+      ansible.builtin.command: sha256sum /var/lib/libvirt_vm/cloud-init/vm1-seed.iso /srv/replicated/vm2-seed.iso
+      register: molecule_before
+      changed_when: false
+
+    - name: Rerun with a secret in vm1's user-data
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: a secret in user-data
+        molecule_args:
+          - -vvv
+          - --diff
+          - -e
+          - >-
+            {{ {'libvirt_vm_vms': [libvirt_vm_vms[0] | combine({'cloud_init': {'enabled': true, 'files': {'user-data':
+               '#cloud-config\npassword: ' ~ molecule_secret ~ '\n'}}})] + libvirt_vm_vms[1:]} | to_json }}
+        molecule_expect: ok
+
+    - name: Read the ISOs after
+      ansible.builtin.command: sha256sum /var/lib/libvirt_vm/cloud-init/vm1-seed.iso /srv/replicated/vm2-seed.iso
+      register: molecule_after
+      changed_when: false
+
+    - name: Vm1's ISO rebuilt, vm2's kept, the secret never printed
+      ansible.builtin.assert:
+        that:
+          - molecule_after.stdout_lines[0] != molecule_before.stdout_lines[0]
+          - molecule_after.stdout_lines[1] == molecule_before.stdout_lines[1]
+          - molecule_run.stdout is not search(molecule_secret)
+          - molecule_run.stdout is search('censored')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: The secret is in the ISO
+      ansible.builtin.shell: >-
+        rm -f /tmp/molecule-user-data; xorriso -osirrox on -indev /var/lib/libvirt_vm/cloud-init/vm1-seed.iso
+        -extract /user-data /tmp/molecule-user-data 2>/dev/null; grep -c {{ molecule_secret }} /tmp/molecule-user-data
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Rerun with vm1 back to its files
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: back to its files
+        molecule_args: []
+        molecule_expect: ok
+
+    - name: Rerun again
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: no change
+        molecule_args: []
+        molecule_expect: ok
+
+    - name: Nothing changed
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=0 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: Rerun with vm1 and vm2 absent
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: vm1 and vm2 absent
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': libvirt_vm_vms[:2] | map('combine', {'state': 'absent'}) | list + libvirt_vm_vms[2:]} | to_json }}"
+        molecule_expect: ok
+
+    - name: Read the seeds
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: molecule_gone
+      loop:
+        - /var/lib/libvirt_vm/cloud-init/vm1
+        - /var/lib/libvirt_vm/cloud-init/vm1-seed.iso
+        - /var/lib/libvirt_vm/cloud-init/vm2
+        - /srv/replicated/vm2-seed.iso
+
+    - name: Staged files and default ISOs removed, an ISO at its own path kept
+      ansible.builtin.assert:
+        that: molecule_gone.results | map(attribute='stat.exists') | list == [false, false, false, true]
+        fail_msg: "{{ molecule_gone.results | map(attribute='stat.exists') | list | to_json }}"

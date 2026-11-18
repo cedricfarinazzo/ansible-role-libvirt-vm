@@ -1,0 +1,75 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# Disks from images: a local backing file, a backing URL and a full copy from a URL, served by a local HTTP server
+platforms:
+  - name: libvirt-vm-backing-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare/playbook.yml
+    converge: ../shared/converge.yml
+    side_effect: side_effect/playbook.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        molecule_packages:
+          - qemu-utils
+          - python3
+        libvirt_vm_vms:
+          - name: local
+            disks:
+              - file: /srv/vms/local.qcow2
+                format: qcow2
+                size: 1G
+                target: vda
+                backing_file: /srv/images/base.raw
+                backing_format: raw
+                checksum: sha256:30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58
+          - name: remote
+            disks:
+              - file: /srv/vms/remote.qcow2
+                format: qcow2
+                size: 1G
+                target: vda
+                backing_file: http://127.0.0.1:8080/base.raw
+                backing_format: raw
+                checksum: sha256:30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58
+          - name: copy
+            disks:
+              - file: /srv/vms/copy.raw
+                size: 8M
+                target: vda
+                image: http://127.0.0.1:8080/base.raw
+                checksum: sha256:30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58
+verifier:
+  name: ansible
+scenario:
+  name: backing
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - side_effect
+    - destroy

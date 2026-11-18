@@ -2,46 +2,123 @@
 <domain type='{{ __libvirt_vm_vm.type }}'>
 {# VirtualDomain reads the name with grep: <name> must stay alone on its line #}
   <name>{{ __libvirt_vm_vm.name }}</name>
+{% if __libvirt_vm_vm.uuid is not none %}
+  <uuid>{{ __libvirt_vm_vm.uuid | lower }}</uuid>
+{% elif __libvirt_vm_vm.uuid_deterministic %}
+  <uuid>{{ __libvirt_vm_vm.name | to_uuid }}</uuid>
+{% endif %}
   <memory unit='MiB'>{{ __libvirt_vm_vm.memory_mib }}</memory>
   <currentMemory unit='MiB'>{{ __libvirt_vm_vm.memory_mib }}</currentMemory>
   <vcpu placement='static'>{{ __libvirt_vm_vm.vcpus }}</vcpu>
   <os>
-    <type arch='x86_64' machine='{{ __libvirt_vm_vm.machine }}'>hvm</type>
+    <type arch='{{ __libvirt_vm_vm.arch }}' machine='{{ __libvirt_vm_vm.machine }}'>hvm</type>
 {% if __libvirt_vm_vm.firmware == 'efi' %}
     <loader readonly='yes' type='pflash'>{{ libvirt_vm_ovmf_code }}</loader>
     <nvram template='{{ libvirt_vm_ovmf_vars }}'>{{ libvirt_vm_nvram_dir }}/{{ __libvirt_vm_vm.name }}_VARS.fd</nvram>
 {% endif %}
-    <boot dev='hd'/>
+{# Ordered: the guest tries each device in list order #}
+{% for dev in __libvirt_vm_vm.boot %}
+    <boot dev='{{ dev }}'/>
+{% endfor %}
+{% if __libvirt_vm_vm.bootmenu %}
+    <bootmenu enable='yes'/>
+{% endif %}
+{% if __libvirt_vm_vm.bios_useserial %}
+    <bios useserial='yes'/>
+{% endif %}
   </os>
   <features>
     <acpi/>
+{% if __libvirt_vm_vm.arch == 'x86_64' %}
     <apic/>
+{% else %}
+    <gic version='host'/>
+{% endif %}
   </features>
 {% if __libvirt_vm_vm.cpu_mode != 'none' %}
   <cpu mode='{{ __libvirt_vm_vm.cpu_mode }}'/>
 {% endif %}
-  <clock offset='utc'/>
+  <clock offset='{{ __libvirt_vm_vm.clock_offset }}'/>
   <on_poweroff>destroy</on_poweroff>
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
+{% if __libvirt_vm_vm.emulator is not none %}
+    <emulator>{{ __libvirt_vm_vm.emulator }}</emulator>
+{% endif %}
 {% for disk in __libvirt_vm_vm.disks %}
 {%   set d = __libvirt_vm_disk_defaults | combine(disk) %}
-    <disk type='{{ 'block' if d.dev is defined else 'file' }}' device='disk'>
-      <driver name='qemu' type='{{ d.format }}' cache='{{ d.cache }}' discard='{{ d.discard }}'/>
+    <disk type='{{ 'block' if d.dev is defined else 'file' }}' device='{{ d.device }}'>
+      <driver name='qemu' type='{{ d.format }}' cache='{{ d.cache }}'{% if d.device == 'disk' %} discard='{{ d.discard }}'{% endif %}{% if d.io is not none %} io='{{ d.io }}'{% endif %}/>
       <source {{ 'dev' if d.dev is defined else 'file' }}='{{ d.dev | default(d.file) }}'/>
       <target dev='{{ d.target }}' bus='{{ d.bus }}'/>
+{%   if d.readonly or d.device == 'cdrom' %}
+      <readonly/>
+{%   endif %}
     </disk>
 {% endfor %}
+{% if __libvirt_vm_vm.cloud_init.enabled %}
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{{ __libvirt_vm_vm.cloud_init.iso | default(libvirt_vm_cloud_init_dir ~ '/' ~ __libvirt_vm_vm.name ~ '-seed.iso', true) }}'/>
+      <target dev='{{ __libvirt_vm_vm.cloud_init.target | default('sdz', true) }}' bus='sata'/>
+      <readonly/>
+    </disk>
+{% endif %}
 {% for nic in __libvirt_vm_vm.interfaces %}
 {%   set n = __libvirt_vm_interface_defaults | combine(nic) %}
-    <interface type='bridge'>
+    <interface type='{{ n.type }}'{% if n.trust_guest_rx_filters %} trustGuestRxFilters='yes'{% endif %}>
       <mac address='{{ n.mac | lower }}'/>
+{%   if n.type == 'bridge' %}
       <source bridge='{{ n.bridge }}'/>
+{%   elif n.type == 'network' %}
+      <source network='{{ n.network }}'/>
+{%   else %}
+      <source dev='{{ n.dev }}' mode='{{ n.mode }}'/>
+{%   endif %}
+{%   if n.name is not none %}
+      <target dev='{{ n.name }}'/>
+{%   endif %}
       <model type='{{ n.model }}'/>
+{%   if n.driver is not none %}
+      <driver{% if n.driver.name is defined %} name='{{ n.driver.name }}'{% endif %}{% if n.driver.queues is defined %} queues='{{ n.driver.queues }}'{% endif %}/>
+{%   endif %}
+{%   if n.alias is not none %}
+      <alias name='ua-{{ n.alias }}'/>
+{%   endif %}
     </interface>
 {% endfor %}
-{% if __libvirt_vm_vm.serial %}
+{% for hd in __libvirt_vm_vm.hostdevs %}
+{%   set h = __libvirt_vm_hostdev_defaults | combine(hd) %}
+    <hostdev mode='subsystem' type='{{ h.type }}' managed='{{ 'yes' if h.managed else 'no' }}'>
+      <source>
+{%   if h.type == 'pci' %}
+{%     set a = h.source | lower | split(':') %}
+        <address domain='0x{{ a[0] }}' bus='0x{{ a[1] }}' slot='0x{{ a[2].split('.')[0] }}' function='0x{{ a[2].split('.')[1] }}'/>
+{%   else %}
+        <vendor id='{{ h.vendor | lower }}'/>
+        <product id='{{ h.product | lower }}'/>
+{%   endif %}
+      </source>
+{%   if h.alias is not none %}
+      <alias name='ua-{{ h.alias }}'/>
+{%   endif %}
+{%   if h.destination is not none %}
+{%     set g = h.destination | lower | split(':') %}
+      <address type='pci' domain='0x{{ g[0] }}' bus='0x{{ g[1] }}' slot='0x{{ g[2].split('.')[0] }}' function='0x{{ g[2].split('.')[1] }}'/>
+{%   endif %}
+    </hostdev>
+{% endfor %}
+{% if __libvirt_vm_vm.console_log is not none %}
+    <serial type='file'>
+      <source path='{{ __libvirt_vm_vm.console_log }}'{{ " append='on'" if __libvirt_vm_vm.console_log_append else '' }}/>
+      <target port='0'/>
+    </serial>
+    <console type='file'>
+      <source path='{{ __libvirt_vm_vm.console_log }}'{{ " append='on'" if __libvirt_vm_vm.console_log_append else '' }}/>
+      <target type='serial' port='0'/>
+    </console>
+{% elif __libvirt_vm_vm.serial %}
     <serial type='pty'>
       <target port='0'/>
     </serial>
@@ -54,13 +131,21 @@
       <target type='virtio' name='org.qemu.guest_agent.0'/>
     </channel>
 {% endif %}
-{% if __libvirt_vm_vm.vnc %}
-    <graphics type='vnc' port='-1' autoport='yes' listen='{{ __libvirt_vm_vm.vnc_listen }}'>
-      <listen type='address' address='{{ __libvirt_vm_vm.vnc_listen }}'/>
+{# graphics, when set, replaces vnc and vnc_listen #}
+{% set gr = {'type': 'vnc' if __libvirt_vm_vm.vnc else 'none', 'listen': __libvirt_vm_vm.vnc_listen, 'port': -1}
+   | combine(__libvirt_vm_vm.graphics if __libvirt_vm_vm.graphics is mapping else {}) %}
+{% if gr.type != 'none' %}
+    <graphics type='{{ gr.type }}' port='{{ gr.port }}' autoport='{{ 'yes' if gr.port == -1 else 'no' }}' listen='{{ gr.listen }}'{% if gr.password is defined %} passwd='{{ gr.password }}'{% endif %}>
+      <listen type='address' address='{{ gr.listen }}'/>
     </graphics>
     <video>
-      <model type='virtio'/>
+      <model type='{{ __libvirt_vm_vm.video }}'/>
     </video>
+{% endif %}
+{% if __libvirt_vm_vm.rng %}
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
 {% endif %}
     <memballoon model='virtio'/>
   </devices>

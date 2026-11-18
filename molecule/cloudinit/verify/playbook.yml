@@ -1,0 +1,100 @@
+---
+# Each seed ISO has volume id cidata and the given files; meta-data defaults to the VM name; the cdrom is read-only; vm3 has none.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - vm1
+        - vm2
+        - vm3
+
+    - name: Vm1's seed is a read-only cdrom
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm1.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/devices/disk[@device='cdrom']/source/@file)"
+            value: "/var/lib/libvirt_vm/cloud-init/vm1-seed.iso"
+          - xpath: "string(/domain/devices/disk[@device='cdrom']/target/@dev)"
+            value: "sdz"
+          - xpath: "string(/domain/devices/disk[@device='cdrom']/target/@bus)"
+            value: "sata"
+          - xpath: "count(/domain/devices/disk[@device='cdrom']/readonly)"
+            value: "1"
+
+    - name: Vm2's seed is where it asked
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm2.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/devices/disk[@device='cdrom']/source/@file)"
+            value: "/srv/replicated/vm2-seed.iso"
+          - xpath: "string(/domain/devices/disk[@device='cdrom']/target/@dev)"
+            value: "sdc"
+
+    - name: Vm3 has no seed
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm3.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/disk)"
+            value: "0"
+
+    - name: Read each ISO's volume id and files
+      ansible.builtin.shell: >-
+        set -o pipefail; rm -rf /tmp/seed-{{ item.name }}; xorriso -indev {{ item.iso }} -pvd_info 2>/dev/null | grep '^Volume Id';
+        xorriso -osirrox on -indev {{ item.iso }} -extract / /tmp/seed-{{ item.name }} 2>/dev/null; ls /tmp/seed-{{ item.name }};
+        stat -c %a {{ item.iso }}
+      args:
+        executable: /bin/bash
+      register: molecule_iso
+      changed_when: false
+      loop:
+        - name: vm1
+          iso: /var/lib/libvirt_vm/cloud-init/vm1-seed.iso
+        - name: vm2
+          iso: /srv/replicated/vm2-seed.iso
+
+    - name: Volume id cidata, the files given plus meta-data, ISO 0600
+      ansible.builtin.assert:
+        that:
+          - "molecule_iso.results[0].stdout_lines == ['Volume Id    : cidata', 'meta-data', 'network-config', 'user-data', '600']"
+          - "molecule_iso.results[1].stdout_lines == ['Volume Id    : cidata', 'meta-data', 'user-data', '600']"
+        fail_msg: "{{ molecule_iso.results | map(attribute='stdout') | list }}"
+
+    - name: Read the seed files from the ISOs
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      register: molecule_seed
+      loop:
+        - /tmp/seed-vm1/user-data
+        - /tmp/seed-vm1/meta-data
+        - /tmp/seed-vm1/network-config
+        - /tmp/seed-vm2/meta-data
+
+    - name: Each file is the content given, meta-data the VM name by default
+      ansible.builtin.assert:
+        that:
+          - molecule_c[0] == libvirt_vm_vms[0].cloud_init.files['user-data']
+          - "molecule_c[1] == 'instance-id: vm1\nlocal-hostname: vm1\n'"
+          - molecule_c[2] == libvirt_vm_vms[0].cloud_init.files['network-config']
+          - "molecule_c[3] == 'instance-id: vm2-0001\n'"
+        fail_msg: "{{ molecule_c }}"
+      vars:
+        molecule_c: "{{ molecule_seed.results | map(attribute='content') | map('b64decode') | list }}"
+
+    - name: Read vm3's seed
+      ansible.builtin.stat:
+        path: /var/lib/libvirt_vm/cloud-init/vm3-seed.iso
+      register: molecule_vm3
+
+    - name: Disabled, no ISO built
+      ansible.builtin.assert:
+        that: not molecule_vm3.stat.exists
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

@@ -1,0 +1,23 @@
+---
+# A changed password rewrites the file; the password never reaches the output, even at -vvv with --diff.
+- name: Graphics password secrecy
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Rerun with another password
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: another password
+        molecule_args:
+          - -vvv
+          - --diff
+          - -e
+          - molecule_spice_password=molecule-pw-new-71b0
+        molecule_expect: ok
+
+    - name: Rewritten, neither password printed
+      ansible.builtin.assert:
+        that:
+          - molecule_run.stdout is search('changed=1 ')
+          - molecule_run.stdout is not search('molecule-pw-')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"

@@ -1,0 +1,15 @@
+---
+# Tasks: each {xpath, value} of molecule_xpaths read from molecule_file by xmllint, the value compared exactly.
+- name: XPath values of {{ molecule_file }}
+  ansible.builtin.command:
+    argv:
+      - xmllint
+      - --xpath
+      - "{{ item.xpath }}"
+      - "{{ molecule_file }}"
+  loop: "{{ molecule_xpaths }}"
+  loop_control:
+    label: "{{ item.xpath }} == {{ item.value }}"
+  register: molecule_xp
+  changed_when: false
+  failed_when: molecule_xp.rc != 0 or molecule_xp.stdout != item.value | string

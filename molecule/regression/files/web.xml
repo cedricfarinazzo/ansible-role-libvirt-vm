@@ -1,0 +1,48 @@
+<!-- Ansible managed: rendered by the libvirt_vm role, never defined by it -->
+<domain type='kvm'>
+  <name>web</name>
+  <memory unit='MiB'>2048</memory>
+  <currentMemory unit='MiB'>2048</currentMemory>
+  <vcpu placement='static'>2</vcpu>
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <cpu mode='host-passthrough'/>
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <disk type='block' device='disk'>
+      <driver name='qemu' type='raw' cache='none' discard='unmap'/>
+      <source dev='/dev/vg0/web'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <interface type='bridge'>
+      <mac address='02:00:00:00:00:01'/>
+      <source bridge='br0'/>
+      <model type='virtio'/>
+    </interface>
+    <serial type='pty'>
+      <target port='0'/>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+    <video>
+      <model type='virtio'/>
+    </video>
+    <memballoon model='virtio'/>
+  </devices>
+</domain>

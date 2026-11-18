@@ -1,5 +1,5 @@
 ---
-# Renders only: never virsh define, start or autostart. Pacemaker's VirtualDomain runs each file (config=).
+# Renders only; define.yml defines them when libvirt_vm_pacemaker is false. Pacemaker's VirtualDomain runs each file (config=).
 - name: Validation tools are installed
   ansible.builtin.package:
     name: "{{ libvirt_vm_packages }}"
@@ -28,7 +28,7 @@
 
 - name: Domain XML files are rendered
   ansible.builtin.template:
-    src: domain.xml.j2
+    src: "{{ __libvirt_vm_vm.xml_template | default('domain.xml.j2', true) }}"
     dest: "{{ libvirt_vm_xml_dir }}/{{ __libvirt_vm_item.name }}.xml"
     owner: root
     group: root
@@ -38,8 +38,22 @@
   loop_control:
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.name }}"
+  # A graphics password lands in the file: that VM's diff and result stay out of the output
+  no_log: "{{ __libvirt_vm_secret }}"
+  register: __libvirt_vm_rendered
   vars:
     __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
+
+- name: The console log directories exist
+  ansible.builtin.file:
+    path: "{{ __libvirt_vm_item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop: "{{ __libvirt_vm_console_dirs }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
 
 # The NVRAM file is the VM's EFI state: left in place, removed by hand when the VM is gone for good
 - name: Domain XML files of absent VMs are removed

@@ -1,0 +1,32 @@
+---
+# An existing disk is the VM's data: written into, then a rerun with another size leaves it as it is.
+- name: Existing disks are never touched
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Data in the raw disk
+      ansible.builtin.shell: set -o pipefail; printf 'guest data' | dd of=/srv/vm1/shared.raw conv=notrunc status=none
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Rerun with a larger size
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: a larger size
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': [libvirt_vm_vms[0] | combine({'disks': [libvirt_vm_vms[0].disks[2] | combine({'size': '128M'})]})]} | to_json }}"
+        molecule_expect: ok
+
+    - name: Read the raw disk
+      ansible.builtin.shell: set -o pipefail; head -c 10 /srv/vm1/shared.raw; echo; stat -c %s /srv/vm1/shared.raw
+      args:
+        executable: /bin/bash
+      register: molecule_raw
+      changed_when: false
+
+    - name: Its data and size are kept
+      ansible.builtin.assert:
+        that: molecule_raw.stdout_lines == ['guest data', '67108864']
+        fail_msg: "{{ molecule_raw.stdout_lines }}"

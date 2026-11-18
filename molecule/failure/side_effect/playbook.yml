@@ -47,8 +47,26 @@
       - label: a VNC listen with an embedded newline
         vms: [{name: bad, vnc_listen: "127.0.0.1\n0.0.0.0"}]
         message: 'libvirt_vm_vms bad: .*vnc_listen'
+      - label: autostart under Pacemaker
+        vms: [{name: bad, define: true, autostart: true}]
+        message: 'libvirt_vm_vms bad: define, start and autostart must stay false while libvirt_vm_pacemaker is true'
+      - label: a backing URL without a checksum
+        vms: [{name: bad, disks: [{file: /srv/bad.qcow2, format: qcow2, size: 1G, target: vda, backing_file: "https://cloud.example.com/b.qcow2"}]}]
+        message: 'libvirt_vm_vms bad disks\[0\]: .*with a checksum'
+      - label: boot devices with an embedded newline
+        vms: [{name: bad, boot: ["hd\ncdrom"]}]
+        message: 'libvirt_vm_vms bad: .*boot a non-empty list'
+      - label: a PCI source with a trailing newline
+        vms: [{name: bad, hostdevs: [{type: pci, source: "0000:01:00.0\n"}]}]
+        message: 'libvirt_vm_vms bad hostdevs\[0\]'
+      - label: a graphics password with a quote
+        vms: [{name: bad, graphics: {password: "a'b"}}]
+        message: 'censored'
+      - label: cloud-init without user-data
+        vms: [{name: bad, cloud_init: {enabled: true, files: {meta-data: "x"}}}]
+        message: 'censored'
       - label: an unknown key
-        vms: [{name: bad, autostart: true}]
+        vms: [{name: bad, autostrat: true}]
         message: 'libvirt_vm_vms\[0\]: .*known keys'
   tasks:
     - name: Run each bad input

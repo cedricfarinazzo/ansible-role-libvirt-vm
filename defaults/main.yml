@@ -1,6 +1,6 @@
 ---
-# Each VM: name (required), state, memory_mib, vcpus, type, machine, cpu_mode, firmware, disks, interfaces,
-# vnc, vnc_listen, serial, guest_agent; a missing key takes its value from libvirt_vm_defaults.
+# Each VM: name (required) and the keys listed in README.md; a missing key takes its value from
+# libvirt_vm_defaults, then the role's own (vars/main.yml).
 libvirt_vm_vms: []
 
 # Per-VM defaults, merged over the role's own (vars/main.yml, listed in README.md): a VM's own key wins
@@ -19,3 +19,18 @@ libvirt_vm_nvram_dir: /var/lib/libvirt_vm/nvram
 libvirt_vm_validate: true
 libvirt_vm_packages:
   - libvirt-clients
+
+# Pacemaker's VirtualDomain owns each domain: the role refuses define, start and autostart. false lets the role
+# virsh define each VM (autostart, start if asked) and undefine an absent one.
+libvirt_vm_pacemaker: true
+libvirt_vm_uri: qemu:///system
+
+# Remote images (a disk's backing_file or image URL), downloaded once, checksum verified
+libvirt_vm_image_cache_dir: /var/cache/libvirt_vm
+# NoCloud seed ISOs, <name>-seed.iso; a VM's cloud_init.iso puts its own elsewhere (a replicated volume)
+libvirt_vm_cloud_init_dir: /var/lib/libvirt_vm/cloud-init
+# qemu-img creates disks; xorriso builds seed ISOs: installed only when a VM needs them
+libvirt_vm_disk_packages:
+  - qemu-utils
+libvirt_vm_cloud_init_packages:
+  - xorriso

@@ -1,0 +1,60 @@
+---
+# Each hostdev renders its type, managed flag, host source, guest address and alias exactly.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - vm1
+
+    - name: Vm1's host devices
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm1.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/devices/hostdev)"
+            value: "3"
+          - xpath: "string(/domain/devices/hostdev[1]/@type)"
+            value: "pci"
+          - xpath: "string(/domain/devices/hostdev[1]/@managed)"
+            value: "yes"
+          - xpath: "string(/domain/devices/hostdev[1]/source/address/@domain)"
+            value: "0x0000"
+          - xpath: "string(/domain/devices/hostdev[1]/source/address/@bus)"
+            value: "0x3b"
+          - xpath: "string(/domain/devices/hostdev[1]/source/address/@slot)"
+            value: "0x00"
+          - xpath: "string(/domain/devices/hostdev[1]/source/address/@function)"
+            value: "0x1"
+          - xpath: "string(/domain/devices/hostdev[1]/address/@type)"
+            value: "pci"
+          - xpath: "string(/domain/devices/hostdev[1]/address/@slot)"
+            value: "0x10"
+          - xpath: "string(/domain/devices/hostdev[1]/address/@function)"
+            value: "0x0"
+          - xpath: "string(/domain/devices/hostdev[1]/alias/@name)"
+            value: "ua-nic0"
+          - xpath: "string(/domain/devices/hostdev[2]/@type)"
+            value: "usb"
+          - xpath: "string(/domain/devices/hostdev[2]/source/vendor/@id)"
+            value: "0x1050"
+          - xpath: "string(/domain/devices/hostdev[2]/source/product/@id)"
+            value: "0x0407"
+          - xpath: "string(/domain/devices/hostdev[2]/alias/@name)"
+            value: "ua-key0"
+          - xpath: "count(/domain/devices/hostdev[2]/address)"
+            value: "0"
+          - xpath: "string(/domain/devices/hostdev[3]/@managed)"
+            value: "no"
+          - xpath: "string(/domain/devices/hostdev[3]/source/address/@domain)"
+            value: "0x0001"
+          - xpath: "string(/domain/devices/hostdev[3]/source/address/@slot)"
+            value: "0x1f"
+          - xpath: "string(/domain/devices/hostdev[3]/source/address/@function)"
+            value: "0x7"
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

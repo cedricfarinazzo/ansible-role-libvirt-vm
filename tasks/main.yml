@@ -2,5 +2,16 @@
 - name: Validate inputs
   ansible.builtin.import_tasks: validate.yml
 
+- name: Disks created from their images
+  ansible.builtin.import_tasks: disks.yml
+
+- name: Cloud-init seed ISOs
+  ansible.builtin.import_tasks: cloud_init.yml
+
 - name: Domain XML files
   ansible.builtin.import_tasks: render.yml
+
+# libvirt_vm_pacemaker false only: validate.yml refuses define, start and autostart otherwise
+- name: Domains defined by libvirt
+  ansible.builtin.import_tasks: define.yml
+  when: not libvirt_vm_pacemaker

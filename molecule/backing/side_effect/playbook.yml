@@ -1,0 +1,46 @@
+---
+# The cache serves a rerun with the server gone; a wrong checksum fails, writing no disk and no XML.
+- name: Cache and checksum
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: The HTTP server stops
+      ansible.builtin.command: pkill -f 'http.server 8080'
+      changed_when: true
+
+    - name: Rerun with the server gone
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: server gone
+        molecule_args: []
+        molecule_expect: ok
+
+    - name: The cache served it, nothing changed
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('changed=0 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] }}"
+
+    - name: Rerun with a wrong local checksum
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: a wrong checksum
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': [{'name': 'bad', 'disks': [{'file': '/srv/vms/bad.qcow2', 'format': 'qcow2', 'size': '1G', 'target': 'vda',
+                 'backing_file': '/srv/images/base.raw', 'backing_format': 'raw', 'checksum': 'sha256:' ~ '1' * 64}]}]} | to_json }}"
+        molecule_expect: fail
+
+    - name: Read what the bad VM would have written
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: molecule_bad
+      loop:
+        - /srv/vms/bad.qcow2
+        - /etc/libvirt_vm/bad.xml
+
+    - name: The checksum failed it, nothing written
+      ansible.builtin.assert:
+        that:
+          - molecule_run.stdout is search('Local images match their checksum')
+          - molecule_bad.results | map(attribute='stat.exists') | list == [false, false]
+        fail_msg: "{{ molecule_run.stdout_lines[-20:] }}"

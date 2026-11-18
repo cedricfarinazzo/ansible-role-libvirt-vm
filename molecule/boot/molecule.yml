@@ -1,0 +1,65 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# Boot order: the list order is the XML order; boot menu, BIOS serial, UUIDs, clock, emulator, rng, console log
+platforms:
+  - name: libvirt-vm-boot-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        molecule_packages:
+          - qemu-system-x86
+        libvirt_vm_vms:
+          - name: vm1
+            boot:
+              - network
+              - cdrom
+              - hd
+            bootmenu: true
+            bios_useserial: true
+            uuid: 4C4C4544-0000-1000-8000-0000000000AA
+            clock_offset: localtime
+            emulator: /usr/bin/qemu-system-x86_64
+            rng: true
+            console_log: /var/log/libvirt_vm/vm1-console.log
+            console_log_append: true
+          - name: vm2
+            boot:
+              - cdrom
+              - hd
+            uuid_deterministic: true
+verifier:
+  name: ansible
+scenario:
+  name: boot
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - destroy

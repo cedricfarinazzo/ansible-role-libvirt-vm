@@ -1,0 +1,83 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# 1.0.0 inputs: the XML is byte for byte what 1.0.0 rendered (files/, from tag 1.0.0)
+platforms:
+  - name: libvirt-vm-regression-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        libvirt_vm_vms:
+          - name: web
+            memory_mib: 2048
+            vcpus: 2
+            disks:
+              - dev: /dev/vg0/web
+                target: vda
+            interfaces:
+              - bridge: br0
+                mac: "02:00:00:00:00:01"
+          - name: db.example
+            type: qemu
+            machine: pc
+            cpu_mode: host-model
+            disks:
+              - file: /srv/images/db.qcow2
+                format: qcow2
+                target: sda
+                bus: scsi
+                cache: writeback
+                discard: ignore
+              - dev: /dev/disk/by-id/wwn-0x5000c500a1b2c3d4
+                target: sdb
+                bus: sata
+            interfaces:
+              - bridge: br-lan.20
+                mac: "52:54:00:AB:CD:EF"
+                model: e1000e
+              - bridge: br1
+                mac: "02:00:00:00:00:02"
+            vnc: false
+            serial: false
+            guest_agent: false
+          - name: tiny
+            cpu_mode: none
+            vnc_listen: "::1"
+          - name: uefi
+            firmware: efi
+            vcpus: 4
+verifier:
+  name: ansible
+scenario:
+  name: regression
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - destroy

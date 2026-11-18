@@ -9,9 +9,14 @@
       - "'name' not in libvirt_vm_defaults"
       - libvirt_vm_validate is boolean
       - libvirt_vm_packages is sequence and libvirt_vm_packages is not string and libvirt_vm_packages is not mapping
+      - libvirt_vm_disk_packages is sequence and libvirt_vm_disk_packages is not string and libvirt_vm_disk_packages is not mapping
+      - libvirt_vm_cloud_init_packages is sequence and libvirt_vm_cloud_init_packages is not string and libvirt_vm_cloud_init_packages is not mapping
+      - libvirt_vm_pacemaker is boolean
+      - libvirt_vm_uri is string and libvirt_vm_uri is match(__libvirt_vm_uri_re)
     fail_msg: >-
       libvirt_vm_vms must be a list, libvirt_vm_defaults a mapping of VM keys without name,
-      libvirt_vm_validate a boolean, libvirt_vm_packages a list
+      libvirt_vm_validate and libvirt_vm_pacemaker booleans, libvirt_vm_packages, libvirt_vm_disk_packages and
+      libvirt_vm_cloud_init_packages lists, libvirt_vm_uri {{ __libvirt_vm_uri_re }}
     quiet: true
 
 - name: Directories and firmware paths are valid
@@ -20,14 +25,15 @@
       - __libvirt_vm_item.value is string
       - __libvirt_vm_item.value is match(__libvirt_vm_path_re)
       - __libvirt_vm_item.value is not search(__libvirt_vm_dotseg_re)
-      - __libvirt_vm_item.key not in ['libvirt_vm_xml_dir', 'libvirt_vm_nvram_dir'] or __libvirt_vm_item.value is not match(__libvirt_vm_forbidden_re)
+      - __libvirt_vm_item.key in ['libvirt_vm_ovmf_code', 'libvirt_vm_ovmf_vars'] or __libvirt_vm_item.value is not match(__libvirt_vm_forbidden_re)
     fail_msg: >-
       {{ __libvirt_vm_item.key }}: {{ __libvirt_vm_item.value | string | to_json }} must be an absolute path of
-      [A-Za-z0-9_.:+/-] with no . or .. segment; the XML and NVRAM directories never under /etc/libvirt or /var/lib/libvirt
+      [A-Za-z0-9_.:+/-] with no . or .. segment; the role's directories never under /etc/libvirt or /var/lib/libvirt
     quiet: true
   loop: >-
     {{ {'libvirt_vm_xml_dir': libvirt_vm_xml_dir, 'libvirt_vm_nvram_dir': libvirt_vm_nvram_dir,
-        'libvirt_vm_ovmf_code': libvirt_vm_ovmf_code, 'libvirt_vm_ovmf_vars': libvirt_vm_ovmf_vars} | dict2items }}
+        'libvirt_vm_ovmf_code': libvirt_vm_ovmf_code, 'libvirt_vm_ovmf_vars': libvirt_vm_ovmf_vars,
+        'libvirt_vm_image_cache_dir': libvirt_vm_image_cache_dir, 'libvirt_vm_cloud_init_dir': libvirt_vm_cloud_init_dir} | dict2items }}
   loop_control:
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.key }}"
@@ -44,6 +50,7 @@
       {{ (__libvirt_vm_item.name | default('') if __libvirt_vm_item is mapping else __libvirt_vm_item) | string | to_json }}
       must match {{ __libvirt_vm_name_re }}; known keys: {{ __libvirt_vm_vm_keys | join(', ') }}
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -80,6 +87,7 @@
       type {{ __libvirt_vm_types | join('|') }}, machine {{ __libvirt_vm_machine_re }}, cpu_mode {{ __libvirt_vm_cpu_modes | join('|') }},
       firmware bios|efi, disks and interfaces lists, vnc/serial/guest_agent booleans, vnc_listen an IP address
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
@@ -102,10 +110,30 @@
       - __libvirt_vm_disk.bus in __libvirt_vm_buses
       - __libvirt_vm_disk.cache in __libvirt_vm_caches
       - __libvirt_vm_disk.discard in __libvirt_vm_discards
+      - __libvirt_vm_disk.device in __libvirt_vm_devices
+      - __libvirt_vm_disk.readonly is boolean
+      - __libvirt_vm_disk.io in __libvirt_vm_ios
+      # Created or filled by the role: file disks only, never a cdrom; backing_file and image exclusive
+      - (__libvirt_vm_disk.size is not defined and __libvirt_vm_disk.backing_file is not defined and __libvirt_vm_disk.image is not defined)
+        or (__libvirt_vm_disk.file is defined and __libvirt_vm_disk.device == 'disk')
+      - not (__libvirt_vm_disk.backing_file is defined and __libvirt_vm_disk.image is defined)
+      - __libvirt_vm_disk.size is not defined or (__libvirt_vm_disk.size is string and __libvirt_vm_disk.size is match(__libvirt_vm_size_re))
+      - __libvirt_vm_disk.backing_file is not defined or __libvirt_vm_disk.size is defined
+      - __libvirt_vm_disk.backing_file is not defined or __libvirt_vm_disk.format == 'qcow2'
+      - __libvirt_vm_disk.backing_format | default('qcow2') in __libvirt_vm_formats
+      - __libvirt_vm_disk.backing_format is not defined or __libvirt_vm_disk.backing_file is defined
+      - __libvirt_vm_disk.checksum is not defined or (__libvirt_vm_disk.checksum is string and __libvirt_vm_disk.checksum is match(__libvirt_vm_checksum_re))
+      - __libvirt_vm_disk.checksum is not defined or __libvirt_vm_disk.backing_file is defined or __libvirt_vm_disk.image is defined
+      - __libvirt_vm_src is none or (__libvirt_vm_src is string and (__libvirt_vm_src is match(__libvirt_vm_url_re)
+        or (__libvirt_vm_src is match(__libvirt_vm_path_re) and __libvirt_vm_src is not search(__libvirt_vm_dotseg_re))))
+      # A download is verified: a URL always comes with its checksum
+      - __libvirt_vm_src is none or __libvirt_vm_src is not match('^https?://') or __libvirt_vm_disk.checksum is defined
     fail_msg: >-
       libvirt_vm_vms {{ __libvirt_vm_item.vm }} disks[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.disk | to_json }} needs exactly
       one of dev (/dev/...) or file (absolute path), a target ({{ __libvirt_vm_target_re }}), format {{ __libvirt_vm_formats | join('|') }},
-      bus {{ __libvirt_vm_buses | join('|') }}, cache {{ __libvirt_vm_caches | join('|') }}, discard {{ __libvirt_vm_discards | join('|') }};
+      bus {{ __libvirt_vm_buses | join('|') }}, cache {{ __libvirt_vm_caches | join('|') }}, discard {{ __libvirt_vm_discards | join('|') }},
+      device disk|cdrom, readonly a boolean, io native|threads|io_uring; size ({{ __libvirt_vm_size_re }}), backing_file (needs size and
+      format qcow2) or image only on a file disk, either an absolute path or an http(s) URL with a checksum (sha256:|sha512:hex);
       known keys: {{ __libvirt_vm_disk_keys | join(', ') }}
     quiet: true
   loop: "{{ __libvirt_vm_disk_list }}"
@@ -117,6 +145,7 @@
       {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for d in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).disks %}{%
       set _ = out.append({'vm': vm.name, 'index': loop.index0, 'disk': d}) %}{% endfor %}{% endfor %}{{ out }}
     __libvirt_vm_disk: "{{ __libvirt_vm_disk_defaults | combine(__libvirt_vm_item.disk if __libvirt_vm_item.disk is mapping else {}) }}"
+    __libvirt_vm_src: "{{ __libvirt_vm_disk.backing_file | default(__libvirt_vm_disk.image | default(none)) }}"
 
 - name: Disk targets are unique within each VM
   ansible.builtin.assert:
@@ -124,25 +153,50 @@
       - __libvirt_vm_targets | length == __libvirt_vm_targets | unique | length
     fail_msg: "libvirt_vm_vms {{ __libvirt_vm_item.name }}: a disk target is used twice in {{ __libvirt_vm_targets | to_json }}"
     quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
   loop_control:
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.name }}"
   vars:
-    __libvirt_vm_targets: "{{ (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item)).disks | map(attribute='target') | list }}"
+    __libvirt_vm_v: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
+    __libvirt_vm_targets: >-
+      {{ __libvirt_vm_v.disks | map(attribute='target') | list
+         + ([__libvirt_vm_v.cloud_init.target | default('sdz', true)] if __libvirt_vm_v.cloud_init.enabled | default(false) is true else []) }}
 
 - name: Each interface is valid
   ansible.builtin.assert:
     that:
       - __libvirt_vm_item.nic is mapping
       - __libvirt_vm_item.nic.keys() | difference(__libvirt_vm_interface_keys) | length == 0
-      - __libvirt_vm_item.nic.bridge is defined and __libvirt_vm_item.nic.bridge is string and __libvirt_vm_item.nic.bridge is match(__libvirt_vm_bridge_re)
+      - __libvirt_vm_nic.type in __libvirt_vm_nic_types
+      # Exactly the source key of its type: bridge, network or dev
+      - (__libvirt_vm_nic.bridge is defined) == (__libvirt_vm_nic.type == 'bridge')
+      - (__libvirt_vm_nic.network is defined) == (__libvirt_vm_nic.type == 'network')
+      - (__libvirt_vm_nic.dev is defined) == (__libvirt_vm_nic.type == 'direct')
+      - __libvirt_vm_nic.bridge is not defined or (__libvirt_vm_nic.bridge is string and __libvirt_vm_nic.bridge is match(__libvirt_vm_bridge_re))
+      - __libvirt_vm_nic.dev is not defined or (__libvirt_vm_nic.dev is string and __libvirt_vm_nic.dev is match(__libvirt_vm_bridge_re))
+      - __libvirt_vm_nic.network is not defined or (__libvirt_vm_nic.network is string and __libvirt_vm_nic.network is match(__libvirt_vm_name_re))
+      - __libvirt_vm_nic.mode in __libvirt_vm_nic_modes
       - __libvirt_vm_item.nic.mac is defined and __libvirt_vm_item.nic.mac is string and __libvirt_vm_item.nic.mac is match(__libvirt_vm_mac_re)
       - __libvirt_vm_nic.model in __libvirt_vm_nic_models
+      - __libvirt_vm_nic.driver is none or (__libvirt_vm_nic.driver is mapping and __libvirt_vm_nic.driver | length > 0
+        and __libvirt_vm_nic.driver.keys() | difference(['name', 'queues']) | length == 0)
+      - __libvirt_vm_nic.driver is none or __libvirt_vm_nic.driver is not mapping or __libvirt_vm_nic.driver.name | default('vhost') in __libvirt_vm_nic_drivers
+      - __libvirt_vm_nic.driver is none or __libvirt_vm_nic.driver is not mapping or __libvirt_vm_nic.driver.queues is not defined
+        or (__libvirt_vm_nic.driver.queues is integer and __libvirt_vm_nic.driver.queues is not boolean
+            and __libvirt_vm_nic.driver.queues >= 1 and __libvirt_vm_nic.driver.queues <= 256)
+      - __libvirt_vm_nic.alias is none or (__libvirt_vm_nic.alias is string and __libvirt_vm_nic.alias is match(__libvirt_vm_alias_re))
+      # libvirt reserves vnet and macvtap names for its own
+      - __libvirt_vm_nic.name is none or (__libvirt_vm_nic.name is string and __libvirt_vm_nic.name is match(__libvirt_vm_bridge_re)
+        and __libvirt_vm_nic.name is not match('^(vnet|macvtap|macvlan)'))
+      - __libvirt_vm_nic.trust_guest_rx_filters is boolean
     fail_msg: >-
-      libvirt_vm_vms {{ __libvirt_vm_item.vm }} interfaces[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.nic | to_json }} needs a bridge
-      ({{ __libvirt_vm_bridge_re }}), a unicast mac (aa:bb:cc:dd:ee:ff), model {{ __libvirt_vm_nic_models | join('|') }};
-      known keys: {{ __libvirt_vm_interface_keys | join(', ') }}
+      libvirt_vm_vms {{ __libvirt_vm_item.vm }} interfaces[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.nic | to_json }} needs
+      type {{ __libvirt_vm_nic_types | join('|') }} with its source: bridge or dev ({{ __libvirt_vm_bridge_re }}) or network, a unicast mac
+      (aa:bb:cc:dd:ee:ff), model {{ __libvirt_vm_nic_models | join('|') }}, mode {{ __libvirt_vm_nic_modes | join('|') }}, driver
+      {name {{ __libvirt_vm_nic_drivers | join('|') }}, queues 1-256}, alias {{ __libvirt_vm_alias_re }}, name not vnet*/macvtap*,
+      trust_guest_rx_filters a boolean; known keys: {{ __libvirt_vm_interface_keys | join(', ') }}
     quiet: true
   loop: "{{ __libvirt_vm_nic_list }}"
   loop_control:
@@ -164,3 +218,156 @@
     __libvirt_vm_macs: >-
       {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for n in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).interfaces %}{%
       set _ = out.append(n.mac | lower) %}{% endfor %}{% endfor %}{{ out }}
+
+- name: Each VM's other settings are valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_vm.uuid is none or (__libvirt_vm_vm.uuid is string and __libvirt_vm_vm.uuid is match(__libvirt_vm_uuid_re))
+      - __libvirt_vm_vm.uuid_deterministic is boolean
+      - __libvirt_vm_vm.arch in __libvirt_vm_arches
+      - __libvirt_vm_vm.emulator is none or (__libvirt_vm_vm.emulator is string and __libvirt_vm_vm.emulator is match(__libvirt_vm_path_re)
+        and __libvirt_vm_vm.emulator is not search(__libvirt_vm_dotseg_re))
+      - __libvirt_vm_vm.clock_offset in __libvirt_vm_clock_offsets
+      - __libvirt_vm_vm.boot is sequence and __libvirt_vm_vm.boot is not string and __libvirt_vm_vm.boot is not mapping
+      - __libvirt_vm_vm.boot | length > 0
+      - __libvirt_vm_vm.boot | difference(__libvirt_vm_boot_devs) | length == 0
+      - __libvirt_vm_vm.boot | length == __libvirt_vm_vm.boot | unique | length
+      - __libvirt_vm_vm.bootmenu is boolean
+      - __libvirt_vm_vm.bios_useserial is boolean
+      - __libvirt_vm_vm.video in __libvirt_vm_videos
+      - __libvirt_vm_vm.rng is boolean
+      - __libvirt_vm_vm.console_log is none or (__libvirt_vm_vm.console_log is string and __libvirt_vm_vm.console_log is match(__libvirt_vm_path_re)
+        and __libvirt_vm_vm.console_log is not search(__libvirt_vm_dotseg_re))
+      - __libvirt_vm_vm.console_log_append is boolean
+      - __libvirt_vm_vm.hostdevs is sequence and __libvirt_vm_vm.hostdevs is not string and __libvirt_vm_vm.hostdevs is not mapping
+      - __libvirt_vm_vm.xml_template is none or (__libvirt_vm_vm.xml_template is string and __libvirt_vm_vm.xml_template is match(__libvirt_vm_template_re)
+        and __libvirt_vm_vm.xml_template is not search(__libvirt_vm_dotseg_re))
+      - __libvirt_vm_vm.define is boolean
+      - __libvirt_vm_vm.autostart is boolean
+      - __libvirt_vm_vm.start is boolean
+      - (__libvirt_vm_vm.autostart or __libvirt_vm_vm.start) is false or __libvirt_vm_vm.define
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_vm.name }}: uuid a UUID, arch {{ __libvirt_vm_arches | join('|') }}, emulator an absolute path,
+      clock_offset utc|localtime, boot a non-empty list of distinct hd|cdrom|network, video {{ __libvirt_vm_videos | join('|') }},
+      console_log an absolute path, hostdevs a list, xml_template a relative .j2 path; uuid_deterministic, bootmenu, bios_useserial, rng,
+      console_log_append, define, autostart, start booleans; autostart and start need define
+    quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
+  loop: "{{ libvirt_vm_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  vars:
+    __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
+
+# VirtualDomain undefines a defined domain before each start, and a libvirt autostart races its own start
+- name: No VM is defined, started or autostarted by the role under Pacemaker
+  ansible.builtin.assert:
+    that:
+      - not libvirt_vm_pacemaker or not (__libvirt_vm_vm.define or __libvirt_vm_vm.autostart or __libvirt_vm_vm.start)
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_vm.name }}: define, start and autostart must stay false while libvirt_vm_pacemaker is true
+      (VirtualDomain runs the domain); set libvirt_vm_pacemaker false for a VM libvirt runs alone
+    quiet: true
+  no_log: "{{ __libvirt_vm_secret }}"
+  loop: "{{ libvirt_vm_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  vars:
+    __libvirt_vm_vm: "{{ __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item) }}"
+
+- name: Each VM's graphics are valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_g is mapping
+      - __libvirt_vm_g.keys() | difference(__libvirt_vm_graphics_keys) | length == 0
+      - __libvirt_vm_g.type | default('vnc') in __libvirt_vm_graphics_types
+      - __libvirt_vm_g.listen is not defined or (__libvirt_vm_g.listen is string and __libvirt_vm_g.listen is match(__libvirt_vm_listen_re))
+      - __libvirt_vm_g.port is not defined or (__libvirt_vm_g.port is integer and __libvirt_vm_g.port is not boolean
+        and (__libvirt_vm_g.port == -1 or (__libvirt_vm_g.port >= 5900 and __libvirt_vm_g.port <= 65535)))
+      - __libvirt_vm_g.password is not defined or (__libvirt_vm_g.password is string and __libvirt_vm_g.password is match(__libvirt_vm_password_re))
+    # The password never reaches the output
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_item.name }} graphics: a mapping of {{ __libvirt_vm_graphics_keys | join(', ') }}; type
+      {{ __libvirt_vm_graphics_types | join('|') }}, listen an IP address, port -1 or 5900-65535, password 1-64 characters without
+      quote, angle bracket, ampersand, space or newline
+    quiet: true
+  loop: "{{ libvirt_vm_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  no_log: "{{ __libvirt_vm_secret }}"
+  # The merged value: a graphics set in libvirt_vm_defaults is checked as well
+  when: __libvirt_vm_g is not none
+  vars:
+    __libvirt_vm_g: "{{ (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item)).graphics }}"
+
+- name: Each hostdev is valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_item.hd is mapping
+      - __libvirt_vm_item.hd.keys() | difference(__libvirt_vm_hostdev_keys) | length == 0
+      - __libvirt_vm_hd.type is defined and __libvirt_vm_hd.type in __libvirt_vm_hostdev_types
+      # pci by host address; usb by vendor and product ids
+      - (__libvirt_vm_hd.source is defined) == (__libvirt_vm_hd.type | default('') == 'pci')
+      - (__libvirt_vm_hd.vendor is defined) == (__libvirt_vm_hd.type | default('') == 'usb')
+      - (__libvirt_vm_hd.product is defined) == (__libvirt_vm_hd.type | default('') == 'usb')
+      - __libvirt_vm_hd.source is not defined or (__libvirt_vm_hd.source is string and __libvirt_vm_hd.source is match(__libvirt_vm_pci_re))
+      - __libvirt_vm_hd.vendor is not defined or (__libvirt_vm_hd.vendor is string and __libvirt_vm_hd.vendor is match(__libvirt_vm_usb_id_re))
+      - __libvirt_vm_hd.product is not defined or (__libvirt_vm_hd.product is string and __libvirt_vm_hd.product is match(__libvirt_vm_usb_id_re))
+      - __libvirt_vm_hd.destination is none or (__libvirt_vm_hd.destination is string and __libvirt_vm_hd.destination is match(__libvirt_vm_pci_re))
+      - __libvirt_vm_hd.alias is none or (__libvirt_vm_hd.alias is string and __libvirt_vm_hd.alias is match(__libvirt_vm_alias_re))
+      - __libvirt_vm_hd.managed is boolean
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_item.vm }} hostdevs[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.hd | to_json }} needs type
+      pci with source (dddd:bb:ss.f) or type usb with vendor and product (0xNNNN); destination a guest PCI address, alias
+      {{ __libvirt_vm_alias_re }}, managed a boolean; known keys: {{ __libvirt_vm_hostdev_keys | join(', ') }}
+    quiet: true
+  loop: "{{ __libvirt_vm_hd_list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.vm }} hostdevs[{{ __libvirt_vm_item.index }}]"
+  vars:
+    __libvirt_vm_hd_list: >-
+      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for h in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).hostdevs %}{%
+      set _ = out.append({'vm': vm.name, 'index': loop.index0, 'hd': h}) %}{% endfor %}{% endfor %}{{ out }}
+    __libvirt_vm_hd: "{{ __libvirt_vm_hostdev_defaults | combine(__libvirt_vm_item.hd if __libvirt_vm_item.hd is mapping else {}) }}"
+
+- name: PCI host devices are given to one VM only
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_pcis | length == __libvirt_vm_pcis | unique | length
+    fail_msg: "libvirt_vm_vms: a PCI host device is used twice in {{ __libvirt_vm_pcis | to_json }}"
+    quiet: true
+  vars:
+    __libvirt_vm_pcis: >-
+      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for h in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).hostdevs %}{%
+      if h.type == 'pci' %}{% set _ = out.append(h.source | lower) %}{% endif %}{% endfor %}{% endfor %}{{ out }}
+
+# Seed files may hold secrets: never printed, in the message or the result
+- name: Each VM's cloud-init is valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_ci is mapping
+      - __libvirt_vm_ci.keys() | difference(__libvirt_vm_cloud_init_keys) | length == 0
+      - __libvirt_vm_ci.enabled is defined and __libvirt_vm_ci.enabled is boolean
+      - __libvirt_vm_ci.files | default({}) is mapping
+      - (__libvirt_vm_ci.files | default({})).keys() | difference(__libvirt_vm_cloud_init_files) | length == 0
+      - (__libvirt_vm_ci.files | default({})).values() | reject('string') | list | length == 0
+      - not __libvirt_vm_ci.enabled or 'user-data' in __libvirt_vm_ci.files | default({})
+      - __libvirt_vm_ci.iso is not defined or (__libvirt_vm_ci.iso is string and __libvirt_vm_ci.iso is match(__libvirt_vm_path_re)
+        and __libvirt_vm_ci.iso is not search(__libvirt_vm_dotseg_re) and __libvirt_vm_ci.iso is not match(__libvirt_vm_forbidden_re))
+      - __libvirt_vm_ci.target is not defined or (__libvirt_vm_ci.target is string and __libvirt_vm_ci.target is match(__libvirt_vm_target_re))
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_item.name }} cloud_init: a mapping of {{ __libvirt_vm_cloud_init_keys | join(', ') }}; enabled a
+      boolean; files a mapping of {{ __libvirt_vm_cloud_init_files | join(', ') }} to strings, user-data required when enabled; iso an
+      absolute path, never under /etc/libvirt or /var/lib/libvirt; target {{ __libvirt_vm_target_re }}
+    quiet: true
+  loop: "{{ libvirt_vm_vms }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.name }}"
+  no_log: true
+  vars:
+    __libvirt_vm_ci: "{{ (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(__libvirt_vm_item)).cloud_init }}"
