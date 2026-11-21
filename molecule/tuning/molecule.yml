@@ -1,0 +1,78 @@
+---
+dependency:
+  name: shell
+  command: sh -c 'ansible-galaxy collection install -r "$MOLECULE_SCENARIO_DIRECTORY/../shared/collections.yml"'
+driver:
+  name: docker
+# IOThreads and the balloon: set per VM, from libvirt_vm_defaults, and turned off again by a VM
+platforms:
+  - name: libvirt-vm-tuning-${MOLECULE_DISTRO:-debian13}
+    hostname: vmhost
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-debian13}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    groups:
+      - vmhosts
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    verify: verify/playbook.yml
+  inventory:
+    group_vars:
+      all:
+        ansible_become: false
+      vmhosts:
+        libvirt_vm_defaults:
+          iothreads: 1
+          balloon_free_page_reporting: true
+        libvirt_vm_vms:
+          # Two iothreads: vda on the first by default, vdb on the second, sda (SATA) and the cdrom on none
+          - name: vm1
+            iothreads: 2
+            balloon_autodeflate: true
+            disks:
+              - dev: /dev/vg0/vm1-root
+                target: vda
+                io: native
+              - dev: /dev/vg0/vm1-data
+                target: vdb
+                iothread: 2
+              - file: /srv/vm1/legacy.raw
+                target: sda
+                bus: sata
+              - file: /srv/iso/installer.iso
+                device: cdrom
+                target: sdb
+                bus: sata
+          # Off again: the XML an input without these keys renders
+          - name: vm2
+            iothreads: 0
+            balloon_free_page_reporting: false
+            disks:
+              - dev: /dev/vg0/vm2-root
+                target: vda
+          # The defaults alone
+          - name: vm3
+            disks:
+              - dev: /dev/vg0/vm3-root
+                target: vda
+verifier:
+  name: ansible
+scenario:
+  name: tuning
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - check
+    - converge
+    - verify
+    - idempotence
+    - destroy

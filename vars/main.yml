@@ -52,6 +52,11 @@ __libvirt_vm_base:
   define: false
   autostart: false
   start: false
+  # IOThreads: 0 renders none; with 1 or more, each virtio disk runs on iothread 1 unless its own iothread says otherwise
+  iothreads: 0
+  # memballoon freePageReporting (the guest hands freed pages back to the host) and autodeflate (on guest OOM)
+  balloon_free_page_reporting: false
+  balloon_autodeflate: false
 
 # Allowed keys per object: anything else fails validation, a typo never renders silently
 __libvirt_vm_vm_keys:
@@ -88,6 +93,9 @@ __libvirt_vm_vm_keys:
   - define
   - autostart
   - start
+  - iothreads
+  - balloon_free_page_reporting
+  - balloon_autodeflate
 __libvirt_vm_disk_keys:
   - dev
   - file
@@ -104,6 +112,7 @@ __libvirt_vm_disk_keys:
   - backing_format
   - checksum
   - image
+  - iothread
 __libvirt_vm_disk_defaults:
   format: raw
   bus: virtio
@@ -112,6 +121,7 @@ __libvirt_vm_disk_defaults:
   device: disk
   readonly: false
   io: null
+  iothread: null
 __libvirt_vm_interface_keys:
   - type
   - bridge

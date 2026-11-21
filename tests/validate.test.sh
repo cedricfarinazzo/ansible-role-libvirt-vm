@@ -269,5 +269,21 @@ bad "a seed target with an embedded newline" "$(ci '"enabled": true, "files": {"
 bad "a seed target used by a disk" '{"libvirt_vm_vms": [{"name": "a", "disks": [{"file": "/srv/a.img", "target": "sdz"}], "cloud_init": {"enabled": true, "files": {"user-data": "x"}}}]}'
 bad "an unknown cloud-init key" "$(ci '"enabled": false, "seed": "x"')"
 
+# IOThreads and the balloon
+good "iothreads and the balloon options" "$(vm ", \"iothreads\": 2, \"balloon_free_page_reporting\": true, \"balloon_autodeflate\": true")"
+good "iothreads from the defaults" "{\"libvirt_vm_defaults\": {\"iothreads\": 1, \"balloon_free_page_reporting\": true}, \"libvirt_vm_vms\": [{$VM}]}"
+good "a disk on iothread 2" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"iothreads\": 2, \"disks\": [{\"dev\": \"/dev/vg0/a\", \"target\": \"vda\", \"iothread\": 2}]}]}"
+bad "iothreads as a string" "$(vm ", \"iothreads\": \"1\"")"
+bad "iothreads as a boolean" "$(vm ", \"iothreads\": true")"
+bad "negative iothreads" "$(vm ", \"iothreads\": -1")"
+bad "too many iothreads" "$(vm ", \"iothreads\": 65")"
+bad "free page reporting as a string" "$(vm ", \"balloon_free_page_reporting\": \"on\"")"
+bad "autodeflate as a number" "$(vm ", \"balloon_autodeflate\": 1")"
+bad "a disk iothread the VM lacks" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"iothreads\": 1, \"disks\": [{\"dev\": \"/dev/vg0/a\", \"target\": \"vda\", \"iothread\": 2}]}]}"
+bad "a disk iothread without iothreads" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"disks\": [{\"dev\": \"/dev/vg0/a\", \"target\": \"vda\", \"iothread\": 1}]}]}"
+bad "a disk iothread of zero" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"iothreads\": 1, \"disks\": [{\"dev\": \"/dev/vg0/a\", \"target\": \"vda\", \"iothread\": 0}]}]}"
+bad "a disk iothread as a string" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"iothreads\": 1, \"disks\": [{\"dev\": \"/dev/vg0/a\", \"target\": \"vda\", \"iothread\": \"1\"}]}]}"
+bad "a disk iothread on a SATA disk" "{\"libvirt_vm_vms\": [{\"name\": \"a\", \"iothreads\": 1, \"disks\": [{\"dev\": \"/dev/vg0/a\", \"target\": \"sda\", \"bus\": \"sata\", \"iothread\": 1}]}]}"
+
 if [[ $fails -gt 0 ]]; then echo "$fails failed" >&2; exit 1; fi
 echo "all passed"

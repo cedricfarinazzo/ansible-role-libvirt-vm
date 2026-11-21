@@ -42,6 +42,10 @@ provisioner:
             type: qemu
             cpu_mode: maximum
             memory_mib: 128
+            # QEMU starts them under TCG too: the running domain keeps each
+            iothreads: 1
+            balloon_free_page_reporting: true
+            balloon_autodeflate: true
             disks:
               - file: /srv/vd-test.qcow2
                 format: qcow2

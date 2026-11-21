@@ -170,6 +170,18 @@ Every key below was added in 1.1.0; at its default it renders exactly what 1.0.0
       trust_guest_rx_filters: false
 ```
 
+Every key below was added in 1.3.0; at its default it renders nothing new.
+
+```yaml
+  iothreads: 0              # 1-64: <iothreads>; each virtio disk runs on iothread 1 unless it sets its own
+  balloon_free_page_reporting: false  # true: the guest hands freed pages back, the host RSS follows guest use
+  balloon_autodeflate: false          # true: the balloon deflates when the guest runs out of memory
+  disks:
+    - dev: /dev/vg0/web
+      target: vda
+      iothread: null        # 1 to the VM's iothreads, virtio disks only; null: iothread 1 when the VM has iothreads
+```
+
 The boot order is the ordered `boot` list (`<os><boot dev=.../>`); the role does not use per-device `<boot order=>`, which libvirt refuses next to it.
 
 ### Role Variables
@@ -225,6 +237,9 @@ Every value is checked before any change; a bad one fails the run naming the inp
 | `console_log_append` | `false` | boolean | `true`: keep the file across restarts and append. `false`: truncated at each start. |
 | `guest_agent` | `true` | boolean | Adds the `org.qemu.guest_agent.0` virtio-serial channel; the agent in the guest then answers `virsh domifaddr --source agent` and clean shutdowns. |
 | `rng` | `false` | boolean | `true`: a virtio-rng device fed by the host's `/dev/urandom`; gives guests entropy at boot. |
+| `iothreads` | `0` | integer, 0-64 | IOThreads for the disks (`<iothreads>`). With 1 or more, each virtio disk runs its I/O on iothread 1 unless its own `iothread` names another, off QEMU's main loop. `0`: none, every disk on the main loop. |
+| `balloon_free_page_reporting` | `false` | boolean | `true`: `freePageReporting='on'` on the virtio balloon: the guest reports freed pages and the host reclaims them, so the QEMU process's RSS follows the guest's use instead of its peak. Needs a guest kernel 5.7 or later. Size a host for the full `memory_mib` anyway: a guest may use it all again. Pointless with a PCI `hostdevs` entry (VFIO pins all guest memory). |
+| `balloon_autodeflate` | `false` | boolean | `true`: `autodeflate='on'`: the balloon gives memory back to the guest before its OOM killer runs. |
 | `hostdevs` | `[]` | list of mappings, see below | PCI and USB devices of the host given to the guest. |
 | `cloud_init` | `{enabled: false}` | mapping, see below | A NoCloud seed ISO attached as a read-only cdrom. |
 | `xml_template` | `null` | relative path ending `.j2` | Your own template instead of `domain.xml.j2`, given the same variables. The role's validation still runs on its inputs, not on your template. |
@@ -245,6 +260,7 @@ A disk has exactly one of `dev` and `file`, and a `target`.
 | `bus` | `virtio` | `virtio`, `sata`, `scsi`, `usb` | `virtio`: fastest, needs guest drivers (every Linux). `sata`: the compatible choice for installers and cdroms. `scsi`: many disks, needs a SCSI controller in the guest. `usb`: removable media. |
 | `cache` | `none` | `none`, `default`, `writeback`, `writethrough`, `directsync`, `unsafe` | `none`: bypass the host page cache; the right choice for replicated storage (DRBD) and for live migration. `writeback`: fast, data in the host cache is lost on a host crash. `writethrough`: reads cached, writes synced. `directsync`: no cache and every write synced, slowest. `unsafe`: ignores flushes, only for throwaway VMs. `default`: QEMU's own default. |
 | `io` | `null` | `native`, `threads`, `io_uring` | The asynchronous I/O mode. `null`: libvirt's choice. `native`: Linux AIO, with `cache: none` on block devices. `threads`: portable, works with cached files. `io_uring`: lowest overhead on a recent kernel. |
+| `iothread` | `null` | integer, 1 to the VM's `iothreads` | The iothread of a virtio disk. `null`: iothread 1 when the VM has `iothreads`, none otherwise. Refused on another bus. |
 | `discard` | `unmap` | `unmap`, `ignore` | `unmap`: the guest's TRIM frees blocks on thin volumes and sparse files. `ignore`: never frees. Not rendered for a cdrom. |
 | `device` | `disk` | `disk`, `cdrom` | `cdrom` is always read-only and cannot be created by the role. |
 | `readonly` | `false` | boolean | `true`: the guest cannot write; use it for a shared image. |

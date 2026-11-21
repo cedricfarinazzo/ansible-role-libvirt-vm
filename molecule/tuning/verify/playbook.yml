@@ -1,0 +1,64 @@
+---
+# Each VM's iothreads, each disk's iothread and the balloon attributes, by XPath; no domain defined.
+- name: Verify
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - vm1
+        - vm2
+        - vm3
+
+    - name: Vm1, two iothreads, both balloon options
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm1.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/iothreads)"
+            value: "2"
+          - xpath: "string(/domain/devices/disk[1]/driver/@iothread)"
+            value: "1"
+          - xpath: "string(/domain/devices/disk[1]/driver/@io)"
+            value: "native"
+          - xpath: "string(/domain/devices/disk[2]/driver/@iothread)"
+            value: "2"
+          - xpath: "count(/domain/devices/disk[3]/driver/@iothread)"
+            value: "0"
+          - xpath: "count(/domain/devices/disk[4]/driver/@iothread)"
+            value: "0"
+          - xpath: "string(/domain/devices/memballoon/@freePageReporting)"
+            value: "on"
+          - xpath: "string(/domain/devices/memballoon/@autodeflate)"
+            value: "on"
+
+    - name: Vm2 turned off, no iothreads, no balloon attribute
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm2.xml
+        molecule_xpaths:
+          - xpath: "count(/domain/iothreads)"
+            value: "0"
+          - xpath: "count(/domain/devices/disk/driver/@iothread)"
+            value: "0"
+          - xpath: "count(/domain/devices/memballoon/@*)"
+            value: "1"
+
+    - name: Vm3, the defaults
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/vm3.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/iothreads)"
+            value: "1"
+          - xpath: "string(/domain/devices/disk[1]/driver/@iothread)"
+            value: "1"
+          - xpath: "string(/domain/devices/memballoon/@freePageReporting)"
+            value: "on"
+          - xpath: "count(/domain/devices/memballoon/@autodeflate)"
+            value: "0"
+
+    - name: No domain is defined
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

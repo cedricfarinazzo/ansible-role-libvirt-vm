@@ -20,9 +20,10 @@ Public Ansible role `cedricfarinazzo.libvirt_vm` (Ansible Galaxy): one libvirt d
 - `molecule/absent/` — VMs removed by their state, then all through the defaults.
 - `molecule/check/` — check mode on a fresh host writes nothing.
 - `molecule/failure/` — each bad input refused with its name, nothing written.
-- `molecule/virtualdomain/` — single-node Pacemaker; VirtualDomain starts a rendered file under TCG.
+- `molecule/virtualdomain/` — single-node Pacemaker; VirtualDomain starts a rendered file under TCG, with an iothread and both balloon options.
 - `molecule/regression/` — 1.0.0 and 1.1.0 inputs against `files/`, the XML their tag rendered: byte for byte.
 - `molecule/{disks,backing,cloudinit,nics,hostdevs,graphics,boot}/` — one option group each, values checked by XPath; `backing` serves its image over a local HTTP server.
+- `molecule/tuning/` — iothreads and balloon options per VM, from `libvirt_vm_defaults`, and turned off by a VM.
 - `molecule/autostart/` — `libvirt_vm_pacemaker: false`: define, autostart, start, undefine.
 - `tests/validate.test.sh` — good and bad inputs against `tasks/validate.yml` on localhost.
 - `run-tests.sh` / `Makefile` — local Molecule entry points; several distros or `all` run in parallel, one log each in `.molecule-logs/`.
