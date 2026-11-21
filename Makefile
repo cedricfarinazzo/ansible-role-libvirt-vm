@@ -1,7 +1,7 @@
 # Define supported distributions
 SUPPORTED_DISTROS := debian13 ubuntu2404 ubuntu2604
 DEFAULT_DISTRO := debian13
-SCENARIOS := uefi options absent check failure virtualdomain regression disks backing cloudinit nics hostdevs graphics boot autostart
+SCENARIOS := uefi options absent check failure virtualdomain regression disks backing cloudinit nics hostdevs graphics boot tuning autostart
 
 .PHONY: molecule-test molecule-test-all lint help check-prereqs test $(addprefix molecule-test-,$(SCENARIOS))
 
@@ -25,6 +25,7 @@ help:
 	@echo "  molecule-test-hostdevs     - PCI and USB host devices"
 	@echo "  molecule-test-graphics     - None, VNC and SPICE, a password never logged"
 	@echo "  molecule-test-boot         - Boot order kept, boot menu, UUIDs, clock, emulator, rng, console log"
+	@echo "  molecule-test-tuning       - IOThreads per disk, balloon free page reporting and autodeflate"
 	@echo "  molecule-test-autostart    - Without Pacemaker: define, autostart, start, undefine"
 	@echo "  lint                       - Run ansible-lint"
 	@echo ""

@@ -82,10 +82,13 @@
       - __libvirt_vm_vm.vnc_listen is string and __libvirt_vm_vm.vnc_listen is match(__libvirt_vm_listen_re)
       - __libvirt_vm_vm.serial is boolean
       - __libvirt_vm_vm.guest_agent is boolean
+      - __libvirt_vm_vm.iothreads is integer and __libvirt_vm_vm.iothreads is not boolean and __libvirt_vm_vm.iothreads >= 0 and __libvirt_vm_vm.iothreads <= 64
+      - __libvirt_vm_vm.balloon_free_page_reporting is boolean
+      - __libvirt_vm_vm.balloon_autodeflate is boolean
     fail_msg: >-
-      libvirt_vm_vms {{ __libvirt_vm_vm.name }}: state present|absent, memory_mib an integer >= 16, vcpus 1-512,
+      libvirt_vm_vms {{ __libvirt_vm_vm.name }}: state present|absent, memory_mib an integer >= 16, vcpus 1-512, iothreads 0-64,
       type {{ __libvirt_vm_types | join('|') }}, machine {{ __libvirt_vm_machine_re }}, cpu_mode {{ __libvirt_vm_cpu_modes | join('|') }},
-      firmware bios|efi, disks and interfaces lists, vnc/serial/guest_agent booleans, vnc_listen an IP address
+      firmware bios|efi, disks and interfaces lists, vnc/serial/guest_agent/balloon_* booleans, vnc_listen an IP address
     quiet: true
   no_log: "{{ __libvirt_vm_secret }}"
   loop: "{{ libvirt_vm_vms }}"
@@ -113,6 +116,9 @@
       - __libvirt_vm_disk.device in __libvirt_vm_devices
       - __libvirt_vm_disk.readonly is boolean
       - __libvirt_vm_disk.io in __libvirt_vm_ios
+      # An iothread exists in the VM (1..iothreads) and serves a virtio disk only
+      - __libvirt_vm_disk.iothread is none or (__libvirt_vm_disk.iothread is integer and __libvirt_vm_disk.iothread is not boolean
+        and __libvirt_vm_disk.iothread >= 1 and __libvirt_vm_disk.iothread <= __libvirt_vm_item.iothreads and __libvirt_vm_disk.bus == 'virtio')
       # Created or filled by the role: file disks only, never a cdrom; backing_file and image exclusive
       - (__libvirt_vm_disk.size is not defined and __libvirt_vm_disk.backing_file is not defined and __libvirt_vm_disk.image is not defined)
         or (__libvirt_vm_disk.file is defined and __libvirt_vm_disk.device == 'disk')
@@ -132,7 +138,7 @@
       libvirt_vm_vms {{ __libvirt_vm_item.vm }} disks[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.disk | to_json }} needs exactly
       one of dev (/dev/...) or file (absolute path), a target ({{ __libvirt_vm_target_re }}), format {{ __libvirt_vm_formats | join('|') }},
       bus {{ __libvirt_vm_buses | join('|') }}, cache {{ __libvirt_vm_caches | join('|') }}, discard {{ __libvirt_vm_discards | join('|') }},
-      device disk|cdrom, readonly a boolean, io native|threads|io_uring; size ({{ __libvirt_vm_size_re }}), backing_file (needs size and
+      device disk|cdrom, readonly a boolean, io native|threads|io_uring, iothread 1 to the VM's iothreads on a virtio disk; size ({{ __libvirt_vm_size_re }}), backing_file (needs size and
       format qcow2) or image only on a file disk, either an absolute path or an http(s) URL with a checksum (sha256:|sha512:hex);
       known keys: {{ __libvirt_vm_disk_keys | join(', ') }}
     quiet: true
@@ -142,8 +148,8 @@
     label: "{{ __libvirt_vm_item.vm }} disks[{{ __libvirt_vm_item.index }}]"
   vars:
     __libvirt_vm_disk_list: >-
-      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for d in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).disks %}{%
-      set _ = out.append({'vm': vm.name, 'index': loop.index0, 'disk': d}) %}{% endfor %}{% endfor %}{{ out }}
+      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% set v = __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm) %}{% for d in v.disks %}{%
+      set _ = out.append({'vm': vm.name, 'index': loop.index0, 'disk': d, 'iothreads': v.iothreads}) %}{% endfor %}{% endfor %}{{ out }}
     __libvirt_vm_disk: "{{ __libvirt_vm_disk_defaults | combine(__libvirt_vm_item.disk if __libvirt_vm_item.disk is mapping else {}) }}"
     __libvirt_vm_src: "{{ __libvirt_vm_disk.backing_file | default(__libvirt_vm_disk.image | default(none)) }}"
 

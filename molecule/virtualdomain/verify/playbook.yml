@@ -62,6 +62,15 @@
       ansible.builtin.assert:
         that: molecule_live.stdout is search("name='org.qemu.guest_agent.0'")
 
+    - name: The running domain has its iothread and the balloon options
+      ansible.builtin.assert:
+        that:
+          - molecule_live.stdout is search("<iothreads>1</iothreads>")
+          - molecule_live.stdout is search("<driver [^>]*iothread='1'")
+          - molecule_live.stdout is search("<memballoon model='virtio' [^>]*autodeflate='on'")
+          - molecule_live.stdout is search("<memballoon model='virtio' [^>]*freePageReporting='on'")
+        fail_msg: "{{ molecule_live.stdout_lines | select('search', 'iothread|memballoon|<driver') | list }}"
+
     - name: Read the domain's persistence
       ansible.builtin.command: virsh -c qemu:///system dominfo vd-test
       register: molecule_info

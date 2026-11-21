@@ -10,6 +10,9 @@
   <memory unit='MiB'>{{ __libvirt_vm_vm.memory_mib }}</memory>
   <currentMemory unit='MiB'>{{ __libvirt_vm_vm.memory_mib }}</currentMemory>
   <vcpu placement='static'>{{ __libvirt_vm_vm.vcpus }}</vcpu>
+{% if __libvirt_vm_vm.iothreads > 0 %}
+  <iothreads>{{ __libvirt_vm_vm.iothreads }}</iothreads>
+{% endif %}
   <os>
     <type arch='{{ __libvirt_vm_vm.arch }}' machine='{{ __libvirt_vm_vm.machine }}'>hvm</type>
 {% if __libvirt_vm_vm.firmware == 'efi' %}
@@ -48,8 +51,10 @@
 {% endif %}
 {% for disk in __libvirt_vm_vm.disks %}
 {%   set d = __libvirt_vm_disk_defaults | combine(disk) %}
+{#   A virtio disk of a VM with iothreads runs on iothread 1 unless it names its own #}
+{%   set iot = d.iothread if d.iothread is not none else (1 if __libvirt_vm_vm.iothreads > 0 and d.bus == 'virtio' else none) %}
     <disk type='{{ 'block' if d.dev is defined else 'file' }}' device='{{ d.device }}'>
-      <driver name='qemu' type='{{ d.format }}' cache='{{ d.cache }}'{% if d.device == 'disk' %} discard='{{ d.discard }}'{% endif %}{% if d.io is not none %} io='{{ d.io }}'{% endif %}/>
+      <driver name='qemu' type='{{ d.format }}' cache='{{ d.cache }}'{% if d.device == 'disk' %} discard='{{ d.discard }}'{% endif %}{% if d.io is not none %} io='{{ d.io }}'{% endif %}{% if iot is not none %} iothread='{{ iot }}'{% endif %}/>
       <source {{ 'dev' if d.dev is defined else 'file' }}='{{ d.dev | default(d.file) }}'/>
       <target dev='{{ d.target }}' bus='{{ d.bus }}'/>
 {%   if d.readonly or d.device == 'cdrom' %}
@@ -160,6 +165,6 @@
       <backend model='random'>/dev/urandom</backend>
     </rng>
 {% endif %}
-    <memballoon model='virtio'/>
+    <memballoon model='virtio'{% if __libvirt_vm_vm.balloon_free_page_reporting %} freePageReporting='on'{% endif %}{% if __libvirt_vm_vm.balloon_autodeflate %} autodeflate='on'{% endif %}/>
   </devices>
 </domain>
