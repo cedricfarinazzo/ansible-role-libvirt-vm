@@ -1,0 +1,11 @@
+---
+# Loop devices belong to the host kernel: detached before the container goes, or they outlive it
+- name: Cleanup
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: The scenario's loop devices are detached
+      ansible.builtin.shell: |
+        for l in /dev/molecule/*; do [ -L "$l" ] && losetup -d "$(readlink "$l")"; rm -f "$l"; done; true
+      changed_when: true
+      failed_when: false

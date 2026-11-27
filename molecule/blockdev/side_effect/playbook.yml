@@ -1,0 +1,134 @@
+---
+# Each rerun on the empty device late or a written one: check mode, bad checksums, fail on a read-only device and a missing
+# device write nothing; a written device with its signatures wiped is never written again (its marker); late is written last.
+- name: Guards
+  hosts: vmhosts
+  vars:
+    molecule_late: "{{ {'name': 'late', 'disks': [{'dev': '/dev/molecule/late', 'target': 'vda', 'image': '/srv/images/disk.raw'}]} }}"
+    molecule_late_url: >-
+      {{ {'name': 'late', 'disks': [{'dev': '/dev/molecule/late', 'target': 'vda', 'image': 'http://127.0.0.1:8080/disk.qcow2',
+          'checksum': 'sha256:' ~ '1' * 64}]} }}
+    molecule_late_bad: "{{ molecule_late | combine({'disks': [molecule_late.disks[0] | combine({'checksum': 'sha256:' ~ '2' * 64})]}) }}"
+    molecule_zeros: cmp -n 8388608 /dev/molecule/late /dev/zero
+  tasks:
+    - name: Check mode on an empty device
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: check mode
+        molecule_args:
+          - --check
+          - -e
+          - "{{ {'libvirt_vm_vms': [molecule_late]} | to_json }}"
+        molecule_expect: ok
+
+    - name: Check mode reports the write
+      ansible.builtin.assert:
+        that:
+          - molecule_run.stdout is search('/dev/molecule/late would be written from /srv/images/disk.raw')
+          - molecule_run.stdout is not search('changed=0 ')
+        fail_msg: "{{ molecule_run.stdout_lines[-20:] }}"
+
+    - name: Check mode wrote nothing
+      ansible.builtin.command: "{{ molecule_zeros }}"
+      changed_when: false
+
+    - name: A wrong local checksum
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: wrong local checksum
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': [molecule_late_bad]} | to_json }}"
+        molecule_expect: fail
+
+    - name: The local checksum failed it
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('Local images match their checksum')
+        fail_msg: "{{ molecule_run.stdout_lines[-20:] }}"
+
+    - name: A wrong URL checksum
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: wrong URL checksum
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': [molecule_late_url]} | to_json }}"
+        molecule_expect: fail
+
+    - name: The download checksum failed it
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('Remote images are downloaded and verified')
+        fail_msg: "{{ molecule_run.stdout_lines[-20:] }}"
+
+    - name: A missing device
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: missing device
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': [molecule_late | combine({'disks': [molecule_late.disks[0] | combine({'dev': '/dev/molecule/none'})]})]} | to_json }}"
+        molecule_expect: fail
+
+    - name: The probe failed it
+      ansible.builtin.assert:
+        that: molecule_run.stdout is search('Read the block devices written from an image')
+        fail_msg: "{{ molecule_run.stdout_lines[-20:] }}"
+
+    - name: The empty device is still empty
+      ansible.builtin.command: "{{ molecule_zeros }}"
+      changed_when: false
+
+    - name: A read-only device with libvirt_vm_dev_unwritable fail
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: unwritable fail
+        molecule_args:
+          - -e
+          - libvirt_vm_dev_unwritable=fail
+        molecule_expect: fail
+
+    - name: It fails naming the device
+      ansible.builtin.assert:
+        that: "molecule_run.stdout is search('/dev/molecule/ro: read-only or not writable on this host')"
+        fail_msg: "{{ molecule_run.stdout_lines[-20:] }}"
+
+    - name: The read-only device is still zeros
+      ansible.builtin.command: cmp -n 8388608 /dev/molecule/ro /dev/zero
+      changed_when: false
+
+    - name: A written device loses its signatures
+      ansible.builtin.shell: wipefs -q -a /dev/molecule/url && blockdev --flushbufs /dev/molecule/url && sha256sum < /srv/loop/url.img
+      register: molecule_wiped
+      changed_when: true
+
+    - name: Rerun on the wiped device
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: wiped device
+        molecule_args: []
+        molecule_expect: ok
+
+    - name: Read the wiped device
+      ansible.builtin.shell: blockdev --flushbufs /dev/molecule/url && sha256sum < /srv/loop/url.img
+      register: molecule_after
+      changed_when: false
+
+    - name: Its marker kept it, nothing changed
+      ansible.builtin.assert:
+        that:
+          - molecule_run.stdout is search('changed=0 ')
+          - molecule_after.stdout == molecule_wiped.stdout_lines[-1]
+        fail_msg: "{{ molecule_run.stdout_lines[-6:] + [molecule_wiped.stdout, molecule_after.stdout] }}"
+
+    - name: The empty device written at last
+      ansible.builtin.include_tasks: ../../shared/recap.yml
+      vars:
+        molecule_label: late written
+        molecule_args:
+          - -e
+          - "{{ {'libvirt_vm_vms': [molecule_late]} | to_json }}"
+        molecule_expect: ok
+
+    - name: It holds the image
+      ansible.builtin.command: cmp -n 4194304 /srv/images/disk.raw /dev/molecule/late
+      changed_when: false

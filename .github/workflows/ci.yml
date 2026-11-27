@@ -69,6 +69,7 @@ jobs:
           - regression
           - disks
           - backing
+          - blockdev
           - cloudinit
           - nics
           - hostdevs
