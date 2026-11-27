@@ -14,7 +14,7 @@
 
     - name: Read the devices
       ansible.builtin.shell: |
-        set -eu
+        set -euo pipefail
         for n in url local; do
           cmp -n 4194304 /srv/images/disk.raw /dev/molecule/$n && cmp -i 4194304 -n 4194304 /dev/molecule/$n /dev/zero && echo "$n image"
         done
@@ -24,6 +24,8 @@
         ls /var/lib/libvirt_vm/devices | wc -l
         cat /var/lib/libvirt_vm/devices/{{ '/dev/molecule/url' | hash('sha1') }} /var/lib/libvirt_vm/devices/{{ '/dev/molecule/local' | hash('sha1') }} > /dev/null
         grep -c 'GET /disk.qcow2' /var/log/molecule-http.log; ls /var/cache/libvirt_vm | wc -l
+      args:
+        executable: /bin/bash
       register: molecule_devs
       changed_when: false
 

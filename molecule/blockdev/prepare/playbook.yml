@@ -10,7 +10,7 @@
   tasks:
     - name: The image, the loop devices and the checksum fact
       ansible.builtin.shell: |
-        set -eu
+        set -euo pipefail
         mkdir -p /srv/images /srv/www /srv/loop /dev/molecule /etc/ansible/facts.d
         truncate -s 4M /srv/images/disk.raw
         printf 'label: gpt\n,2M\n' | sfdisk -q /srv/images/disk.raw
