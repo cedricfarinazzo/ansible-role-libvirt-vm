@@ -131,6 +131,10 @@ good "a new disk of a size" "$(disk ', "file": "/srv/a.qcow2", "format": "qcow2"
 good "a disk backed by a local image, checksum" "$(disk ', "file": "/srv/a.qcow2", "format": "qcow2", "size": "20G", "backing_file": "/srv/base.qcow2", "backing_format": "raw", "checksum": "'"$SHA"'"')"
 good "a disk backed by a URL" "$(disk ', "file": "/srv/a.qcow2", "format": "qcow2", "size": "20G", "backing_file": "https://cloud.example.com/images/base.qcow2", "checksum": "'"$SHA"'"')"
 good "a disk copied from a URL" "$(disk ', "file": "/srv/a.raw", "image": "http://cloud.example.com/base.raw", "checksum": "sha512:'"$(printf '%0128d' 0)"'"')"
+good "a block device written from a URL" "$(disk ', "dev": "/dev/vg0/a", "image": "https://cloud.example.com/base.qcow2", "checksum": "'"$SHA"'"')"
+good "a block device written from a local image, no checksum" "$(disk ', "dev": "/dev/vg0/a", "format": "raw", "image": "/srv/base.raw"')"
+good "devices not writable here fail" '{"libvirt_vm_dev_unwritable": "fail"}'
+good "another device marker directory" '{"libvirt_vm_dev_state_dir": "/srv/vm-markers"}'
 good "a PCI hostdev, every key" "$(hd '"type": "pci", "source": "0000:3B:00.1", "destination": "0000:00:10.0", "alias": "gpu0", "managed": false')"
 good "a USB hostdev" "$(hd '"type": "usb", "vendor": "0x1050", "product": "0x0407"')"
 good "spice graphics, port, password" "$(gr '"type": "spice", "listen": "0.0.0.0", "port": 5901, "password": "s3cr#t"')"
@@ -215,6 +219,18 @@ bad "a checksum with a trailing newline" "$(disk ', "file": "/srv/a.img", "image
 bad "a checksum with no image" "$(disk ', "file": "/srv/a.img", "checksum": "'"$SHA"'"')"
 bad "a backing format with no backing file" "$(disk ', "file": "/srv/a.img", "backing_format": "raw"')"
 bad "an unknown backing format" "$(disk ', "file": "/srv/a.qcow2", "format": "qcow2", "size": "1G", "backing_file": "/srv/b.img", "backing_format": "vmdk"')"
+bad "a backing file on a block device" "$(disk ', "dev": "/dev/vg0/a", "format": "qcow2", "backing_file": "/srv/base.qcow2"')"
+bad "a backing file and a size on a block device" "$(disk ', "dev": "/dev/vg0/a", "format": "qcow2", "size": "1G", "backing_file": "/srv/base.qcow2"')"
+bad "an image on a qcow2 block device" "$(disk ', "dev": "/dev/vg0/a", "format": "qcow2", "image": "/srv/base.qcow2"')"
+bad "an image and a size on a block device" "$(disk ', "dev": "/dev/vg0/a", "size": "1G", "image": "/srv/base.raw"')"
+bad "an image on a block cdrom" "$(disk ', "dev": "/dev/sr0", "device": "cdrom", "image": "/srv/base.iso"')"
+bad "a block device image URL without a checksum" "$(disk ', "dev": "/dev/vg0/a", "image": "https://cloud.example.com/base.qcow2"')"
+bad "a block device image with a bad checksum" "$(disk ', "dev": "/dev/vg0/a", "image": "/srv/base.raw", "checksum": "sha256:abc"')"
+bad "a block device image with a checksum and a trailing newline" "$(disk ', "dev": "/dev/vg0/a", "image": "/srv/base.raw", "checksum": "'"$SHA"'\n"')"
+bad "an unknown unwritable action" '{"libvirt_vm_dev_unwritable": "ignore"}'
+bad "an unwritable action with a trailing newline" '{"libvirt_vm_dev_unwritable": "skip\n"}'
+bad "a device marker directory under /var/lib/libvirt" '{"libvirt_vm_dev_state_dir": "/var/lib/libvirt/markers"}'
+bad "a relative device marker directory" '{"libvirt_vm_dev_state_dir": "markers"}'
 bad "a hostdev with no type" "$(hd '"source": "0000:01:00.0"')"
 bad "an unknown hostdev type" "$(hd '"type": "scsi", "source": "0000:01:00.0"')"
 bad "a PCI hostdev without source" "$(hd '"type": "pci"')"
