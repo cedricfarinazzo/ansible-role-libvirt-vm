@@ -1,0 +1,52 @@
+---
+# The empty devices hold the image, raw, then zeros; the filesystem, partition table and read-only devices are as prepared;
+# a marker per written device only; the qcow2 downloaded once and removed from the cache.
+- name: Verify
+  hosts: vmhosts
+  tasks:
+    - name: Each file passes virt-xml-validate
+      ansible.builtin.command: virt-xml-validate /etc/libvirt_vm/{{ item }}.xml domain
+      changed_when: false
+      loop:
+        - written
+        - kept
+        - readonly
+
+    - name: Read the devices
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for n in url local; do
+          cmp -n 4194304 /srv/images/disk.raw /dev/molecule/$n && cmp -i 4194304 -n 4194304 /dev/molecule/$n /dev/zero && echo "$n image"
+        done
+        cmp -n 8388608 /dev/molecule/ro /dev/zero && echo "ro zeros"
+        for n in fs pt; do cmp /dev/molecule/$n /srv/loop/$n.img && echo "$n as prepared"; done
+        blkid -p -o value -s TYPE /dev/molecule/fs; blkid -p -o value -s PTTYPE /dev/molecule/pt
+        ls /var/lib/libvirt_vm/devices | wc -l
+        cat /var/lib/libvirt_vm/devices/{{ '/dev/molecule/url' | hash('sha1') }} /var/lib/libvirt_vm/devices/{{ '/dev/molecule/local' | hash('sha1') }} > /dev/null
+        grep -c 'GET /disk.qcow2' /var/log/molecule-http.log; ls /var/cache/libvirt_vm | wc -l
+      args:
+        executable: /bin/bash
+      register: molecule_devs
+      changed_when: false
+
+    - name: Written once each, the rest untouched, two markers, one download, an empty cache
+      ansible.builtin.assert:
+        that: molecule_devs.stdout_lines == ['url image', 'local image', 'ro zeros', 'fs as prepared', 'pt as prepared', 'ext4', 'gpt', '2', '1', '0']
+        fail_msg: "{{ molecule_devs.stdout_lines }}"
+
+    - name: The devices are the VM's disks, raw
+      ansible.builtin.include_tasks: ../../shared/xpath.yml
+      vars:
+        molecule_file: /etc/libvirt_vm/written.xml
+        molecule_xpaths:
+          - xpath: "string(/domain/devices/disk[1]/source/@dev)"
+            value: /dev/molecule/url
+          - xpath: "string(/domain/devices/disk[1]/driver/@type)"
+            value: raw
+          - xpath: "string(/domain/devices/disk[2]/source/@dev)"
+            value: /dev/molecule/local
+          - xpath: "count(/domain/devices/graphics)"
+            value: "0"
+
+    - name: The role defined no domain
+      ansible.builtin.include_tasks: ../../shared/no_domain.yml

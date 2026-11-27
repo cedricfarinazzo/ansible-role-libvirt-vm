@@ -27,6 +27,10 @@ libvirt_vm_uri: qemu:///system
 
 # Remote images (a disk's backing_file or image URL), downloaded once, checksum verified
 libvirt_vm_image_cache_dir: /var/cache/libvirt_vm
+# One marker per block device written from an image: never written again, even with no signature left
+libvirt_vm_dev_state_dir: /var/lib/libvirt_vm/devices
+# A dev disk with an image that this host cannot write (read-only, or a replica not primary here): skip or fail
+libvirt_vm_dev_unwritable: skip
 # NoCloud seed ISOs, <name>-seed.iso; a VM's cloud_init.iso puts its own elsewhere (a replicated volume)
 libvirt_vm_cloud_init_dir: /var/lib/libvirt_vm/cloud-init
 # qemu-img creates disks; xorriso builds seed ISOs: installed only when a VM needs them

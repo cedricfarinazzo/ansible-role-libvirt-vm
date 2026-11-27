@@ -302,10 +302,20 @@ __libvirt_vm_console_dirs: >-
 __libvirt_vm_define_vms: >-
   {% set out = [] %}{% for vm in libvirt_vm_vms %}{% set v = __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm) %}{%
   if v.state == 'present' and v.define %}{% set _ = out.append(v) %}{% endif %}{% endfor %}{{ out }}
-# Local images with a checksum: checked before a disk is made from them
-__libvirt_vm_local_images: >-
-  {% set out = [] %}{% for d in __libvirt_vm_created %}{% set src = d.backing_file | default(d.image | default('')) %}{%
-  if d.checksum is defined and src is not match('^https?://') %}{% set _ = out.append(d) %}{% endif %}{% endfor %}{{ out }}
+# Block devices written once from an image: dev disks of present VMs with image
+__libvirt_vm_dev_images: >-
+  {% set out = [] %}{% for vm in libvirt_vm_vms %}{% set v = __libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm) %}{%
+  if v.state == 'present' %}{% for d in v.disks %}{% if d.dev is defined and d.image is defined %}{%
+  set _ = out.append(__libvirt_vm_disk_defaults | combine(d)) %}{% endif %}{% endfor %}{% endif %}{% endfor %}{{ out }}
+# Prints the state of block device $1 with marker $2: notblock, marked, unwritable, content or empty. Read-only: it opens
+# the device read-write (no write) to see a device this host cannot write; any signature or probe error reads as content.
+__libvirt_vm_dev_state_sh: >-
+  [ -b "$1" ] || { echo notblock; exit 0; };
+  [ -e "$2" ] && { echo marked; exit 0; };
+  { [ "$(blockdev --getro "$1")" = 0 ] && (: 1<>"$1") && dd if="$1" of=/dev/null bs=64k count=1; } >/dev/null 2>&1 || { echo unwritable; exit 0; };
+  blkid -p "$1" >/dev/null 2>&1; rc=$?;
+  sig=$(wipefs --noheadings --output TYPE "$1" 2>/dev/null) || sig=error;
+  if [ "$rc" = 2 ] && [ -z "$sig" ]; then echo empty; else echo content; fi
 # A graphics password or cloud-init files anywhere: every task whose item holds a VM is no_log, or -v prints them
 __libvirt_vm_secret: >-
   {% set found = [] %}{% for v in ((libvirt_vm_vms if libvirt_vm_vms is sequence and libvirt_vm_vms is not string else []) + [libvirt_vm_defaults]) %}{%

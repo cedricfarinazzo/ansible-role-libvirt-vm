@@ -1,0 +1,47 @@
+---
+- name: Shared prepare
+  ansible.builtin.import_playbook: ../../shared/prepare.yml
+
+# The image: a 4 MiB GPT disk, raw and qcow2, the qcow2 served on 127.0.0.1:8080, each request logged; their sha256 in a
+# local fact. Loop devices of 8 MiB behind /dev/molecule/<name>: url, local, late empty; fs ext4; pt a GPT; ro empty, read-only.
+- name: Images, loop devices and an HTTP server
+  hosts: vmhosts
+  gather_facts: false
+  tasks:
+    - name: The image, the loop devices and the checksum fact
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mkdir -p /srv/images /srv/www /srv/loop /dev/molecule /etc/ansible/facts.d
+        truncate -s 4M /srv/images/disk.raw
+        printf 'label: gpt\n,2M\n' | sfdisk -q /srv/images/disk.raw
+        qemu-img convert -f raw -O qcow2 /srv/images/disk.raw /srv/www/disk.qcow2
+        printf '{"raw": "%s", "qcow2": "%s"}\n' "$(sha256sum < /srv/images/disk.raw | cut -d' ' -f1)" \
+          "$(sha256sum < /srv/www/disk.qcow2 | cut -d' ' -f1)" > /etc/ansible/facts.d/molecule.fact
+        # A privileged container sees only the loop nodes present at its start
+        for i in $(seq 0 127); do [ -e /dev/loop$i ] || mknod /dev/loop$i b 7 $i; done
+        for n in url local late fs pt ro; do
+          rm -f /srv/loop/$n.img; truncate -s 8M /srv/loop/$n.img
+        done
+        mkfs.ext4 -q -F /srv/loop/fs.img
+        printf 'label: gpt\n' | sfdisk -q /srv/loop/pt.img
+        for n in url local late fs pt ro; do
+          if [ $n = ro ]; then ro=-r; else ro=; fi
+          ln -sfn "$(losetup -f --show $ro /srv/loop/$n.img)" /dev/molecule/$n
+        done
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: The HTTP server runs
+      ansible.builtin.shell: >-
+        cd /srv/www && nohup python3 -m http.server 8080 --bind 127.0.0.1 > /var/log/molecule-http.log 2>&1 &
+      changed_when: true
+
+    - name: The HTTP server answers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/disk.qcow2
+        method: HEAD
+      register: molecule_http
+      retries: 10
+      delay: 1
+      until: molecule_http is succeeded

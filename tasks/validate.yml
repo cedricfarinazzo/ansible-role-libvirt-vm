@@ -13,10 +13,11 @@
       - libvirt_vm_cloud_init_packages is sequence and libvirt_vm_cloud_init_packages is not string and libvirt_vm_cloud_init_packages is not mapping
       - libvirt_vm_pacemaker is boolean
       - libvirt_vm_uri is string and libvirt_vm_uri is match(__libvirt_vm_uri_re)
+      - libvirt_vm_dev_unwritable in ['skip', 'fail']
     fail_msg: >-
       libvirt_vm_vms must be a list, libvirt_vm_defaults a mapping of VM keys without name,
       libvirt_vm_validate and libvirt_vm_pacemaker booleans, libvirt_vm_packages, libvirt_vm_disk_packages and
-      libvirt_vm_cloud_init_packages lists, libvirt_vm_uri {{ __libvirt_vm_uri_re }}
+      libvirt_vm_cloud_init_packages lists, libvirt_vm_uri {{ __libvirt_vm_uri_re }}, libvirt_vm_dev_unwritable skip|fail
     quiet: true
 
 - name: Directories and firmware paths are valid
@@ -33,7 +34,8 @@
   loop: >-
     {{ {'libvirt_vm_xml_dir': libvirt_vm_xml_dir, 'libvirt_vm_nvram_dir': libvirt_vm_nvram_dir,
         'libvirt_vm_ovmf_code': libvirt_vm_ovmf_code, 'libvirt_vm_ovmf_vars': libvirt_vm_ovmf_vars,
-        'libvirt_vm_image_cache_dir': libvirt_vm_image_cache_dir, 'libvirt_vm_cloud_init_dir': libvirt_vm_cloud_init_dir} | dict2items }}
+        'libvirt_vm_image_cache_dir': libvirt_vm_image_cache_dir, 'libvirt_vm_cloud_init_dir': libvirt_vm_cloud_init_dir,
+        'libvirt_vm_dev_state_dir': libvirt_vm_dev_state_dir} | dict2items }}
   loop_control:
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.key }}"
@@ -119,9 +121,9 @@
       # An iothread exists in the VM (1..iothreads) and serves a virtio disk only
       - __libvirt_vm_disk.iothread is none or (__libvirt_vm_disk.iothread is integer and __libvirt_vm_disk.iothread is not boolean
         and __libvirt_vm_disk.iothread >= 1 and __libvirt_vm_disk.iothread <= __libvirt_vm_item.iothreads and __libvirt_vm_disk.bus == 'virtio')
-      # Created or filled by the role: file disks only, never a cdrom; backing_file and image exclusive
+      # Created or filled by the role: file disks, never a cdrom; a dev disk is checked by the next task; backing_file and image exclusive
       - (__libvirt_vm_disk.size is not defined and __libvirt_vm_disk.backing_file is not defined and __libvirt_vm_disk.image is not defined)
-        or (__libvirt_vm_disk.file is defined and __libvirt_vm_disk.device == 'disk')
+        or (__libvirt_vm_disk.file is defined and __libvirt_vm_disk.device == 'disk') or __libvirt_vm_disk.dev is defined
       - not (__libvirt_vm_disk.backing_file is defined and __libvirt_vm_disk.image is defined)
       - __libvirt_vm_disk.size is not defined or (__libvirt_vm_disk.size is string and __libvirt_vm_disk.size is match(__libvirt_vm_size_re))
       - __libvirt_vm_disk.backing_file is not defined or __libvirt_vm_disk.size is defined
@@ -139,7 +141,7 @@
       one of dev (/dev/...) or file (absolute path), a target ({{ __libvirt_vm_target_re }}), format {{ __libvirt_vm_formats | join('|') }},
       bus {{ __libvirt_vm_buses | join('|') }}, cache {{ __libvirt_vm_caches | join('|') }}, discard {{ __libvirt_vm_discards | join('|') }},
       device disk|cdrom, readonly a boolean, io native|threads|io_uring, iothread 1 to the VM's iothreads on a virtio disk; size ({{ __libvirt_vm_size_re }}), backing_file (needs size and
-      format qcow2) or image only on a file disk, either an absolute path or an http(s) URL with a checksum (sha256:|sha512:hex);
+      format qcow2) only on a file disk, image on a file disk or a dev disk (format raw), either an absolute path or an http(s) URL with a checksum (sha256:|sha512:hex);
       known keys: {{ __libvirt_vm_disk_keys | join(', ') }}
     quiet: true
   loop: "{{ __libvirt_vm_disk_list }}"
@@ -152,6 +154,27 @@
       set _ = out.append({'vm': vm.name, 'index': loop.index0, 'disk': d, 'iothreads': v.iothreads}) %}{% endfor %}{% endfor %}{{ out }}
     __libvirt_vm_disk: "{{ __libvirt_vm_disk_defaults | combine(__libvirt_vm_item.disk if __libvirt_vm_item.disk is mapping else {}) }}"
     __libvirt_vm_src: "{{ __libvirt_vm_disk.backing_file | default(__libvirt_vm_disk.image | default(none)) }}"
+
+# A block device is never created or resized; its image is written raw, only once: no size, no qcow2 overlay, no cdrom
+- name: Each block-device disk is valid
+  ansible.builtin.assert:
+    that:
+      - __libvirt_vm_disk.size is not defined
+      - __libvirt_vm_disk.backing_file is not defined
+      - __libvirt_vm_disk.image is not defined or (__libvirt_vm_disk.format == 'raw' and __libvirt_vm_disk.device == 'disk')
+    fail_msg: >-
+      libvirt_vm_vms {{ __libvirt_vm_item.vm }} disks[{{ __libvirt_vm_item.index }}]: {{ __libvirt_vm_item.disk | to_json }}: a dev disk takes
+      no size (the device's own) and no backing_file (a qcow2 overlay needs a file disk); an image on a dev needs format raw and device disk
+    quiet: true
+  loop: "{{ __libvirt_vm_disk_list | selectattr('disk.dev', 'defined') | list }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.vm }} disks[{{ __libvirt_vm_item.index }}]"
+  vars:
+    __libvirt_vm_disk_list: >-
+      {% set out = [] %}{% for vm in libvirt_vm_vms %}{% for d in (__libvirt_vm_base | combine(libvirt_vm_defaults) | combine(vm)).disks %}{%
+      set _ = out.append({'vm': vm.name, 'index': loop.index0, 'disk': d}) %}{% endfor %}{% endfor %}{{ out }}
+    __libvirt_vm_disk: "{{ __libvirt_vm_disk_defaults | combine(__libvirt_vm_item.disk) }}"
 
 - name: Disk targets are unique within each VM
   ansible.builtin.assert:

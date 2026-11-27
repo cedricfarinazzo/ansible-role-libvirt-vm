@@ -1,11 +1,12 @@
 ---
-# A disk is created or filled only when its file is missing: an existing disk is the VM's data, never touched.
+# A disk is created or filled only when its file is missing, a block device written only when empty and unmarked:
+# an existing disk is the VM's data, never touched.
 - name: Disk tools are installed
   ansible.builtin.package:
     name: "{{ libvirt_vm_disk_packages }}"
     state: present
   when:
-    - __libvirt_vm_created | length > 0
+    - (__libvirt_vm_created + __libvirt_vm_dev_images) | length > 0
     - libvirt_vm_disk_packages | length > 0
 
 - name: Read the disks the role creates
@@ -18,16 +19,50 @@
     loop_var: __libvirt_vm_item
     label: "{{ __libvirt_vm_item.file }}"
 
-# Only a missing disk needs its image: a rerun with every disk present downloads nothing
+# Read-only probe, run in check mode too; a missing or non-block dev fails: the role never creates one
+- name: Read the block devices written from an image
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "{{ __libvirt_vm_dev_state_sh }}"
+      - sh
+      - "{{ __libvirt_vm_item.dev }}"
+      - "{{ libvirt_vm_dev_state_dir }}/{{ __libvirt_vm_item.dev | hash('sha1') }}"
+  register: __libvirt_vm_dev_state
+  changed_when: false
+  check_mode: false
+  failed_when: __libvirt_vm_dev_state.rc != 0 or __libvirt_vm_dev_state.stdout == 'notblock'
+  loop: "{{ __libvirt_vm_dev_images }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.dev }}"
+
+- name: No block device this host cannot write, when libvirt_vm_dev_unwritable is fail
+  ansible.builtin.assert:
+    that: __libvirt_vm_unwritable | length == 0
+    fail_msg: >-
+      {{ __libvirt_vm_unwritable | join(', ') }}: read-only or not writable on this host, image not written;
+      libvirt_vm_dev_unwritable: skip leaves such a device to the host that can write it
+    quiet: true
+  when: libvirt_vm_dev_unwritable == 'fail'
+  vars:
+    __libvirt_vm_unwritable: >-
+      {{ __libvirt_vm_dev_state.results | selectattr('stdout', '==', 'unwritable') | map(attribute='__libvirt_vm_item.dev') | list }}
+
+# Only a missing disk or an empty device needs its image: a rerun with every disk present downloads nothing
 - name: The missing disks are known
   ansible.builtin.set_fact:
     __libvirt_vm_missing: "{{ __libvirt_vm_disk_stat.results | rejectattr('stat.exists') | map(attribute='__libvirt_vm_item') | list }}"
+    __libvirt_vm_dev_writes: >-
+      {{ __libvirt_vm_dev_state.results | default([]) | selectattr('stdout', 'defined') | selectattr('stdout', '==', 'empty')
+         | map(attribute='__libvirt_vm_item') | list }}
     __libvirt_vm_backing_urls: "{{ __libvirt_vm_created | selectattr('backing_file', 'defined') | map(attribute='backing_file') | list }}"
 
 - name: The remote images the missing disks need are known
   ansible.builtin.set_fact:
     __libvirt_vm_needed_urls: >-
-      {% set out = {} %}{% for d in __libvirt_vm_missing %}{% for k in ['backing_file', 'image'] %}{% if d[k] is defined and d[k] is match('^https?://') %}{%
+      {% set out = {} %}{% for d in __libvirt_vm_missing + __libvirt_vm_dev_writes %}{% for k in ['backing_file', 'image'] %}{% if d[k] is defined and d[k] is match('^https?://') %}{%
       set _ = out.update({d[k]: d.checksum}) %}{% endif %}{% endfor %}{% endfor %}{{ out }}
 
 - name: The image cache exists, root only
@@ -63,10 +98,12 @@
   failed_when: >-
     not __libvirt_vm_local.stat.exists
     or __libvirt_vm_local.stat.checksum != __libvirt_vm_item.checksum.split(':')[1]
-  loop: "{{ __libvirt_vm_local_images | selectattr('file', 'in', __libvirt_vm_missing | map(attribute='file') | list) | list }}"
+  loop: >-
+    {% set out = [] %}{% for d in __libvirt_vm_missing + __libvirt_vm_dev_writes %}{%
+    if d.checksum is defined and d.backing_file | default(d.image) is not match('^https?://') %}{% set _ = out.append(d) %}{% endif %}{% endfor %}{{ out }}
   loop_control:
     loop_var: __libvirt_vm_item
-    label: "{{ __libvirt_vm_item.file }}"
+    label: "{{ __libvirt_vm_item.file | default(__libvirt_vm_item.dev) }}"
 
 - name: The directory of each created disk exists
   ansible.builtin.file:
@@ -117,6 +154,61 @@
   when:
     - __libvirt_vm_item.__libvirt_vm_item.image is defined
     - __libvirt_vm_item.__libvirt_vm_item.size is defined
+
+# Probed again right before the write: a device that got content or a marker meanwhile fails, unwritten.
+# qemu-img -n writes into the existing device, raw; an image larger than the device fails before writing.
+- name: Empty block devices are written from their image
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - >-
+        state=$(sh -c "$0" sh "$1" "$2") && [ "$state" = empty ] || { echo "$1: $state, not written" >&2; exit 3; };
+        exec qemu-img convert -n -O raw "$3" "$1"
+      - "{{ __libvirt_vm_dev_state_sh }}"
+      - "{{ __libvirt_vm_item.dev }}"
+      - "{{ libvirt_vm_dev_state_dir }}/{{ __libvirt_vm_item.dev | hash('sha1') }}"
+      - "{{ (libvirt_vm_image_cache_dir ~ '/' ~ __libvirt_vm_item.checksum | default('') | regex_replace('^[a-z0-9]+:', '') ~ '-' ~ __libvirt_vm_item.image | basename)
+            if __libvirt_vm_item.image is match('^https?://') else __libvirt_vm_item.image }}"
+  changed_when: true
+  when: not ansible_check_mode
+  loop: "{{ __libvirt_vm_dev_writes }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.dev }}"
+
+- name: Block devices that would be written (check mode)
+  ansible.builtin.debug:
+    msg: "{{ __libvirt_vm_item.dev }} would be written from {{ __libvirt_vm_item.image }}"
+  changed_when: true
+  when: ansible_check_mode
+  loop: "{{ __libvirt_vm_dev_writes }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.dev }}"
+
+- name: The block device markers directory exists, root only
+  ansible.builtin.file:
+    path: "{{ libvirt_vm_dev_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: __libvirt_vm_dev_writes | length > 0
+
+# The marker keeps a written device from a second write, even once its signatures are gone; named by the dev's sha1
+- name: Each written block device is marked
+  ansible.builtin.copy:
+    dest: "{{ libvirt_vm_dev_state_dir }}/{{ __libvirt_vm_item.dev | hash('sha1') }}"
+    content: "{{ {'dev': __libvirt_vm_item.dev, 'image': __libvirt_vm_item.image, 'checksum': __libvirt_vm_item.checksum | default(none)} | to_nice_json }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not ansible_check_mode
+  loop: "{{ __libvirt_vm_dev_writes }}"
+  loop_control:
+    loop_var: __libvirt_vm_item
+    label: "{{ __libvirt_vm_item.dev }}"
 
 # A copied image is no longer needed once its disks exist; a backing file stays, its overlays read it
 - name: Downloaded images only copied are removed

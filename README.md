@@ -52,6 +52,7 @@ The role will:
 - ✅ Install `libvirt-clients` (for `virt-xml-validate`) and check each file with it before it replaces the old one
 - ✅ Write `/etc/libvirt_vm/<name>.xml` (root, `0600`, directory `0700`): block or file disks, bridge NICs, BIOS or EFI (OVMF), a pty serial console, the `org.qemu.guest_agent.0` channel (`virsh domifaddr --source agent`), VNC on `127.0.0.1` by default
 - ✅ Create a missing file disk (`size`, `backing_file` or `image`, from a path or an http(s) URL with its checksum); never touch an existing one
+- ✅ Write an `image` once onto an empty block device (`dev`), raw; never a device with a partition table, a filesystem, LVM or RAID signature, or one already written
 - ✅ Build a NoCloud seed ISO per VM with `cloud_init.enabled` and attach it as a read-only cdrom; the seed files never reach the output
 - ✅ Remove the file of a VM set `absent`
 - ✅ With `libvirt_vm_pacemaker: true` (the default), never run `virsh define`, `start` or `autostart`: a rerun changes nothing and libvirt knows no domain from the role
@@ -89,6 +90,8 @@ libvirt_vm_pacemaker: true             # false: the role may define, autostart a
 libvirt_vm_uri: qemu:///system         # virsh's connection, libvirt_vm_pacemaker false only
 libvirt_vm_image_cache_dir: /var/cache/libvirt_vm       # downloaded images, <hash>-<file name>
 libvirt_vm_cloud_init_dir: /var/lib/libvirt_vm/cloud-init  # seed files and <name>-seed.iso
+libvirt_vm_dev_state_dir: /var/lib/libvirt_vm/devices   # one marker per block device written from an image
+libvirt_vm_dev_unwritable: skip        # fail: a dev with an image this host cannot write fails the run
 libvirt_vm_disk_packages:              # installed when the role creates a disk
   - qemu-utils
 libvirt_vm_cloud_init_packages:        # installed when a VM has cloud_init.enabled
@@ -156,7 +159,7 @@ Every key below was added in 1.1.0; at its default it renders exactly what 1.0.0
       size: 20G             # created by qemu-img when the file is missing: K, M, G, T
       backing_file: null    # a path or an http(s) URL: a qcow2 overlay on it (needs size, format qcow2)
       backing_format: qcow2 # raw
-      image: null           # a path or an http(s) URL: a full copy, grown to size if given
+      image: null           # a path or an http(s) URL: a full copy, grown to size if given; on a dev: written once, raw
       checksum: null        # sha256:<hex> | sha512:<hex>; required with a URL
   interfaces:
     - type: bridge          # network (a libvirt network) | direct (macvtap)
@@ -203,7 +206,9 @@ Every value is checked before any change; a bad one fails the run naming the inp
 | `libvirt_vm_uri` | `qemu:///system` | `qemu[+transport]://[host]/system` or `/session` | virsh's connection; used with `libvirt_vm_pacemaker: false` only. |
 | `libvirt_vm_image_cache_dir` | `/var/cache/libvirt_vm` | absolute path | Downloaded images, named `<checksum>-<file name>`. Only a missing disk's image is downloaded; a copied `image` is removed once its disks exist, a `backing_file` stays (its overlays read it). |
 | `libvirt_vm_cloud_init_dir` | `/var/lib/libvirt_vm/cloud-init` | absolute path, not under libvirt's directories | Staged seed files and the default `<name>-seed.iso`. Root `0711`: qemu traverses it to open the ISO, nobody else lists it; each VM's staging directory is root `0700`. |
-| `libvirt_vm_disk_packages` | `[qemu-utils]` | list | Installed only when a disk is created. |
+| `libvirt_vm_dev_state_dir` | `/var/lib/libvirt_vm/devices` | absolute path, not under libvirt's directories | One marker per block device written from an `image` (root `0600`, named by the sha1 of the `dev` path, holding the dev, image and checksum): a marked device is never written again. Remove a marker, after wiping the device, to have it written again. |
+| `libvirt_vm_dev_unwritable` | `skip` | `skip`, `fail` | A `dev` disk with an `image` that is read-only or cannot be opened for writing on this host. `skip`: leave it, write nothing (a device replicated to several hosts and writable on one only, the run on each host). `fail`: the run fails naming the device, for a single host where that is a mistake. |
+| `libvirt_vm_disk_packages` | `[qemu-utils]` | list | Installed only when a VM has a disk to create or a `dev` with an `image`. |
 | `libvirt_vm_cloud_init_packages` | `[xorriso]` | list | Installed only when a VM has `cloud_init.enabled`. |
 
 #### Per-VM keys
@@ -253,7 +258,7 @@ A disk has exactly one of `dev` and `file`, and a `target`.
 
 | Key | Default | Allowed | What it does and when to pick it |
 |-----|---------|---------|----------------------------------|
-| `dev` | none | `/dev/...` of `A-Za-z0-9_.:+/-`, no `.` or `..` segment | A block device (LVM, DRBD, a LINSTOR resource). Never created by the role. |
+| `dev` | none | `/dev/...` of `A-Za-z0-9_.:+/-`, no `.` or `..` segment | A block device (LVM, DRBD, a LINSTOR resource). Never created or resized by the role; written once from `image` when empty. |
 | `file` | none | absolute path (same shape) | An image file. Created by the role only when `size`, `backing_file` or `image` is given and the file is missing. |
 | `target` | required | `vd`, `sd` or `hd` plus 1-2 letters, unique in the VM | The guest device name, and the order within a bus. Pair it with `bus`: `vd*` for virtio. |
 | `format` | `raw` | `raw`, `qcow2` | `raw`: no overhead, for block devices. `qcow2`: for files with snapshots, overlays or thin growth. |
@@ -267,10 +272,10 @@ A disk has exactly one of `dev` and `file`, and a `target`.
 | `size` | none | `1-9 digits` plus optional `K`, `M`, `G`, `T` | Virtual size. With no `backing_file`/`image`, an empty disk of this size is created when the file is missing. |
 | `backing_file` | none | absolute path or `http(s)://` URL | A qcow2 overlay on this base image (`format: qcow2` and `size` required). The base stays untouched and shared; the overlay holds the VM's changes. Created only when missing. |
 | `backing_format` | `qcow2` | `raw`, `qcow2` | The format of the base image; only with `backing_file`. Cloud images are usually `qcow2`. |
-| `image` | none | absolute path or `http(s)://` URL | A full independent copy of the image into `file`, converted to `format`, then grown to `size` when given. Created only when missing. Exclusive with `backing_file`. |
+| `image` | none | absolute path or `http(s)://` URL | On a `file`: a full independent copy of the image, converted to `format`, then grown to `size` when given; created only when missing. On a `dev`: the image converted to raw and written onto the device once, only when it is empty (see Disks from images); `format: raw`, no `size`, never a cdrom. Exclusive with `backing_file`. |
 | `checksum` | none | `sha256:` plus 64 hex or `sha512:` plus 128 hex | Verifies the source image. Required with a URL; optional (checked before use) with a local path. A mismatch fails before any disk or XML is written. |
 
-An existing disk file is the VM's data: later changes to `size`, `backing_file` or `image` do nothing to it.
+An existing disk file, or a device with content, is the VM's data: later changes to `size`, `backing_file` or `image` do nothing to it. `backing_file` needs a `file` (a qcow2 overlay); a `dev` refuses it, and `size`.
 
 #### Interface keys
 
@@ -330,6 +335,15 @@ With `libvirt_vm_pacemaker: true` (the default) `define`, `start` and `autostart
 ### Disks from images
 
 A file disk with `size`, `backing_file` or `image` is created when its file is missing, and never touched after: a later size or image change does nothing to an existing disk. A URL is downloaded into `libvirt_vm_image_cache_dir` only when a disk that needs it is missing, named by its checksum and verified with it; a copied `image` is removed after the copy, a `backing_file` is kept; a local image with a `checksum` is checked before use. A wrong checksum fails the run before any disk or XML is written. Private images (credentials) are out of scope: download them yourself and give the path.
+
+A `dev` disk with an `image` is written once, raw (`qemu-img convert -n -O raw`), into the existing device; the role never creates or resizes it, and an image larger than the device fails. The device is written only when all of these hold, else it is left as it is:
+
+- it exists and is a block device (else the run fails: the role never creates one);
+- it is writable on this host: not read-only (`blockdev --getro`), opens read-write and reads; otherwise `libvirt_vm_dev_unwritable` says `skip` (default) or `fail`;
+- it has no marker in `libvirt_vm_dev_state_dir`;
+- it is empty: neither `blkid -p` nor `wipefs` finds a partition table, a filesystem, an LVM, RAID or other signature (a probe error counts as content).
+
+The checksum is verified before the write, a mismatch writes nothing, and the state is probed again right before `qemu-img` runs. After the write the device gets its marker: the image's own partition table makes the next run skip it, and the marker keeps it skipped on this host even if the guest removes every signature. Limits: the marker lives on the host that wrote; another host that sees the same device (a replica) relies on the signatures alone, so a guest that leaves no signature on its disk (a raw filesystem-less data disk, wiped tables) can be written again from there. Write on one host, or keep a partition table on the device. To write a device again, wipe it (`wipefs -a`) and remove its marker. Check mode probes the devices, writes nothing and reports each device it would write.
 
 ### Cloud-init
 
@@ -459,6 +473,39 @@ libvirt_vm_vms:
             - "{{ app_ssh_public_key }}"
 ```
 
+### A VM on a block device written from a cloud image
+
+The logical volume exists and is empty; the role writes the image onto it once, raw, and never again. A headless VM: serial console only.
+
+```yaml
+libvirt_vm_vms:
+  - name: db
+    memory_mib: 4096
+    vcpus: 2
+    graphics:
+      type: none
+    disks:
+      - dev: /dev/vg0/db
+        format: raw
+        target: vda
+        image: https://cloud.example.com/images/debian-13-genericcloud-amd64.qcow2
+        checksum: "sha512:{{ debian_image_sha512 }}"
+    interfaces:
+      - bridge: br0
+        mac: "52:54:00:00:00:30"
+    cloud_init:
+      enabled: true
+      files:
+        user-data: |
+          #cloud-config
+          growpart:
+            mode: auto
+          ssh_authorized_keys:
+            - "{{ db_ssh_public_key }}"
+```
+
+The guest grows its root partition to the device's size at first boot (cloud-init `growpart`).
+
 ### A VM libvirt runs alone, started at boot
 
 ```yaml
@@ -515,6 +562,7 @@ tests/validate.test.sh                   # the input checks
 | `regression` | The 1.0.0 inputs (four VMs, BIOS and EFI) and the 1.1.0 graphics mappings (VNC on a fixed port, SPICE with a password, none) render files equal byte for byte to the ones their tag rendered (`files/`); idempotence |
 | `disks` | File, block and cdrom disks, read-only, cache, io and discard, four targets in list order (XPath); disks created by `qemu-img` at their format and size; an existing disk keeps its data and size on a rerun with another size |
 | `backing` | A local backing file and a backing URL (a local HTTP server) under qcow2 overlays, a full copy from a URL grown to its size; each URL downloaded once, the copied image removed from the cache, the backing file kept; with the server stopped a rerun downloads nothing and changes nothing; a wrong checksum fails, no disk and no XML written |
+| `blockdev` | Loop devices: an empty one written from a URL (qcow2 converted to raw, downloaded once, removed from the cache) and one from a local path, both holding the image then zeros; a filesystem and a partition table never written, byte for byte; a read-only device skipped; one marker per written device; check mode before converge; idempotence; then on an empty device: check mode reports the write and writes nothing, a wrong local and a wrong URL checksum fail writing nothing, a missing device fails; `libvirt_vm_dev_unwritable: fail` fails naming the read-only device; a written device with its signatures wiped is not written again (its marker), changed=0 |
 | `cloudinit` | Seed ISOs with volume id `cidata` and exactly the given files, meta-data defaulting to the name, ISO `0600`, seed directory `0711` and staging `0700`, the qemu user reaches the ISO but lists neither, a read-only sata cdrom in the XML, an ISO at a path of its own; `enabled: false`: no cdrom, no ISO; a changed user-data rebuilds that ISO only and its secret never appears at `-vvv --diff`; then a rerun changes nothing; set absent, the staged files and default ISO removed, an ISO at its own path kept |
 | `nics` | Bridge, network and direct interfaces in list order, MAC lower-cased, model, driver name and queues, alias, tap name, trustGuestRxFilters (XPath) |
 | `hostdevs` | PCI by host address with a guest address and alias, unmanaged PCI, USB by vendor and product: each attribute exact (XPath) |
